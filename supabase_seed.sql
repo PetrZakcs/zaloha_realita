@@ -2,7 +2,7 @@
 -- Run this in the Supabase SQL Editor to populate the story and challenge contents.
 
 -- 1. Insert Theme
-INSERT INTO public.themes (id, slug, name, description, "order", is_active)
+INSERT INTO public.themes (id, slug, name, description, theme_order, is_active)
 VALUES (
   't-env-reset', 
   'environmentalni-reset', 
@@ -13,7 +13,7 @@ VALUES (
 ) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description;
 
 -- 2. Insert Story Nodes (Nodes 0 to 8)
-INSERT INTO public.story_nodes (id, theme_id, "order", type, title, cutscene_text, requires_pass)
+INSERT INTO public.story_nodes (id, theme_id, node_order, type, title, cutscene_text, requires_pass)
 VALUES 
 (
   'n-intro', 
@@ -179,7 +179,7 @@ VALUES
 ) ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description, why_text = EXCLUDED.why_text, proof_type = EXCLUDED.proof_type, reward_keys = EXCLUDED.reward_keys, reward_xp = EXCLUDED.reward_xp;
 
 -- 4. Insert Steps for the NPC Challenge (Node 3)
-INSERT INTO public.challenge_steps (id, challenge_id, "order", text)
+INSERT INTO public.challenge_steps (id, challenge_id, step_order, text)
 VALUES 
 ('cs-3-1', 'c-npc-challenge', 1, 'Vyjdi ven z domu nebo kanceláře.'),
 ('cs-3-2', 'c-npc-challenge', 2, 'Najdi v okruhu 100 metrů 3 odhozené odpadky.'),
