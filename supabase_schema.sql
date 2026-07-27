@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   display_name TEXT UNIQUE NOT NULL,
   avatar_level INT DEFAULT 0,
   xp INT DEFAULT 240,
+  uzel INT DEFAULT 0,
   keys_balance INT DEFAULT 7,
   current_streak INT DEFAULT 5,
   longest_streak INT DEFAULT 5,
@@ -35,6 +36,12 @@ DROP POLICY IF EXISTS "Allow authenticated users to update their own profile" ON
 CREATE POLICY "Allow authenticated users to update their own profile" ON public.profiles
   FOR UPDATE USING (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Allow admins to update any profile" ON public.profiles;
+CREATE POLICY "Allow admins to update any profile" ON public.profiles
+  FOR UPDATE USING (
+    EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.is_admin = true)
+  );
+
 -- 2. Themes Table
 CREATE TABLE IF NOT EXISTS public.themes (
   id TEXT PRIMARY KEY,
@@ -54,7 +61,9 @@ CREATE POLICY "Allow public read access to themes" ON public.themes
 
 DROP POLICY IF EXISTS "Allow admin write access to themes" ON public.themes;
 CREATE POLICY "Allow admin write access to themes" ON public.themes
-  FOR ALL USING (true);
+  FOR ALL USING (
+    EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.is_admin = true)
+  );
 
 -- 3. Story Nodes Table
 CREATE TABLE IF NOT EXISTS public.story_nodes (
@@ -77,7 +86,9 @@ CREATE POLICY "Allow public read access to story_nodes" ON public.story_nodes
 
 DROP POLICY IF EXISTS "Allow admin write access to story_nodes" ON public.story_nodes;
 CREATE POLICY "Allow admin write access to story_nodes" ON public.story_nodes
-  FOR ALL USING (true);
+  FOR ALL USING (
+    EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.is_admin = true)
+  );
 
 -- 4. Challenges Table
 CREATE TABLE IF NOT EXISTS public.challenges (
@@ -101,7 +112,9 @@ CREATE POLICY "Allow public read access to challenges" ON public.challenges
 
 DROP POLICY IF EXISTS "Allow admin write access to challenges" ON public.challenges;
 CREATE POLICY "Allow admin write access to challenges" ON public.challenges
-  FOR ALL USING (true);
+  FOR ALL USING (
+    EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.is_admin = true)
+  );
 
 -- 5. Challenge Steps Table
 CREATE TABLE IF NOT EXISTS public.challenge_steps (
@@ -120,7 +133,9 @@ CREATE POLICY "Allow public read access to challenge_steps" ON public.challenge_
 
 DROP POLICY IF EXISTS "Allow admin write access to challenge_steps" ON public.challenge_steps;
 CREATE POLICY "Allow admin write access to challenge_steps" ON public.challenge_steps
-  FOR ALL USING (true);
+  FOR ALL USING (
+    EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.is_admin = true)
+  );
 
 -- 6. User Badges Table
 CREATE TABLE IF NOT EXISTS public.user_badges (
