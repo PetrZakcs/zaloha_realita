@@ -12,7 +12,8 @@ export default function DesktopStory() {
     resetDialog,
     openModal,
     activeChallenge,
-    activeStoryNodeSteps
+    activeStoryNodeSteps,
+    advanceNode
   } = useUserStore();
 
   useEffect(() => {
@@ -166,28 +167,53 @@ export default function DesktopStory() {
           flexShrink: 0
         }}>
           {dialogCompleted ? (
-            <button 
-              onClick={() => openModal('challenge-detail')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                width: '100%',
-                height: '50px',
-                background: '#7C3AED',
-                color: '#fff',
-                fontFamily: 'Inter',
-                fontWeight: '700',
-                fontSize: '16px',
-                letterSpacing: '.01em',
-                border: 'none',
-                borderRadius: '18px',
-                cursor: 'pointer'
-              }}
-            >
-              Spustit výzvu <span style={{ display: 'inline-flex', width: '18px', height: '18px' }}><ArrowRight size={16} /></span>
-            </button>
+            activeChallenge ? (
+              <button
+                onClick={() => openModal('challenge-detail')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  width: '100%',
+                  height: '50px',
+                  background: '#7C3AED',
+                  color: '#fff',
+                  fontFamily: 'Inter',
+                  fontWeight: '700',
+                  fontSize: '16px',
+                  letterSpacing: '.01em',
+                  border: 'none',
+                  borderRadius: '18px',
+                  cursor: 'pointer'
+                }}
+              >
+                Spustit výzvu <span style={{ display: 'inline-flex', width: '18px', height: '18px' }}><ArrowRight size={16} /></span>
+              </button>
+            ) : (
+              <button
+                onClick={() => advanceNode()}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  width: '100%',
+                  height: '50px',
+                  background: '#7C3AED',
+                  color: '#fff',
+                  fontFamily: 'Inter',
+                  fontWeight: '700',
+                  fontSize: '16px',
+                  letterSpacing: '.01em',
+                  border: 'none',
+                  borderRadius: '18px',
+                  cursor: 'pointer'
+                }}
+              >
+                Pokračovat <span style={{ display: 'inline-flex', width: '18px', height: '18px' }}><ArrowRight size={16} /></span>
+              </button>
+            )
           ) : (
             <button 
               onClick={() => {
@@ -253,7 +279,7 @@ export default function DesktopStory() {
           {/* Zigzag nodes list */}
           <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: '22px' }}>
             {[1, 2, 3, 4, 5, 6, 7, 8].map((order) => {
-              const currentUzel = user?.uzel || 3;
+              const currentUzel = user?.uzel ?? 3;
               const isCompleted = order < currentUzel;
               const isActive = order === currentUzel;
               const isLocked = order > currentUzel;

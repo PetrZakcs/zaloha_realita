@@ -12,7 +12,8 @@ export default function MobileStory() {
     resetDialog,
     openModal,
     activeChallenge,
-    activeStoryNodeSteps
+    activeStoryNodeSteps,
+    advanceNode
   } = useUserStore();
 
   useEffect(() => {
@@ -48,7 +49,7 @@ export default function MobileStory() {
           <ChevronLeft size={20} />
         </span>
         <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '15px' }}>
-          Uzel {user?.uzel || 3} / 9
+          Uzel {user?.uzel ?? 3} / 9
         </span>
         <span 
           onClick={() => openModal('collections')}
@@ -192,28 +193,53 @@ export default function MobileStory() {
       {/* Action CTA Button footer */}
       <div style={{ padding: '14px 18px 24px', flexShrink: 0, borderTop: '0.5px solid #382C5C', background: '#0B0A12' }}>
         {dialogCompleted ? (
-          <button 
-            onClick={() => openModal('challenge-detail')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              width: '100%',
-              height: '48px',
-              background: '#7C3AED',
-              color: '#fff',
-              fontFamily: 'Inter',
-              fontWeight: '700',
-              fontSize: '16px',
-              letterSpacing: '.01em',
-              border: 'none',
-              borderRadius: '18px',
-              cursor: 'pointer'
-            }}
-          >
-            Spustit výzvu <span style={{ display: 'inline-flex', width: '18px', height: '18px' }}><ArrowRight size={16} /></span>
-          </button>
+          activeChallenge ? (
+            <button
+              onClick={() => openModal('challenge-detail')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                width: '100%',
+                height: '48px',
+                background: '#7C3AED',
+                color: '#fff',
+                fontFamily: 'Inter',
+                fontWeight: '700',
+                fontSize: '16px',
+                letterSpacing: '.01em',
+                border: 'none',
+                borderRadius: '18px',
+                cursor: 'pointer'
+              }}
+            >
+              Spustit výzvu <span style={{ display: 'inline-flex', width: '18px', height: '18px' }}><ArrowRight size={16} /></span>
+            </button>
+          ) : (
+            <button
+              onClick={() => advanceNode()}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                width: '100%',
+                height: '48px',
+                background: '#7C3AED',
+                color: '#fff',
+                fontFamily: 'Inter',
+                fontWeight: '700',
+                fontSize: '16px',
+                letterSpacing: '.01em',
+                border: 'none',
+                borderRadius: '18px',
+                cursor: 'pointer'
+              }}
+            >
+              Pokračovat <span style={{ display: 'inline-flex', width: '18px', height: '18px' }}><ArrowRight size={16} /></span>
+            </button>
+          )
         ) : (
           <button 
             onClick={() => {

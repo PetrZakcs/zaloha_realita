@@ -1,6 +1,7 @@
 {
-  "short_name": "React App",
-  "name": "Create React App Sample",
+  "short_name": "Hra Reality",
+  "name": "iWau Hra Reality",
+  "description": "Real-world výzvy, příběh a odměny — přestaň sledovat svůj život, začni ho hrát.",
   "icons": [
     {
       "src": "favicon.ico",
@@ -15,11 +16,14 @@
     {
       "src": "logo512.png",
       "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "512x512",
+      "purpose": "any maskable"
     }
   ],
-  "start_url": ".",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "theme_color": "#000000",
-  "background_color": "#ffffff"
+  "orientation": "portrait",
+  "theme_color": "#15111E",
+  "background_color": "#15111E"
 }

@@ -4,7 +4,6 @@ import { useUserStore } from '../store/userStore';
 import { track } from '../lib/analytics';
 import {
   Home as HomeIcon,
-  MessageSquareText,
   LayoutGrid,
   Trophy,
   User as UserIcon,
@@ -39,7 +38,6 @@ export default function Layout() {
 
   const nav = [
     { id: 'home', icon: <HomeIcon size={20} />, label: 'Domů', path: '/' },
-    { id: 'story', icon: <MessageSquareText size={20} />, label: 'Příběh', path: '/story' },
     { id: 'feed', icon: <LayoutGrid size={20} />, label: 'Feed', path: '/feed' },
     { id: 'artefakty', icon: <Sparkles size={20} />, label: 'Artefakty', action: () => openModal('collections') },
     { id: 'leaderboard', icon: <Trophy size={20} />, label: 'Žebříček', path: '/leaderboard' },
@@ -58,7 +56,7 @@ export default function Layout() {
               Ahoj, <span style={{ color: '#A78BFA' }}>{user?.name || 'TP'}</span> 👋
             </div>
             <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#6B6B8A', marginTop: '2px' }}>
-              Máš rozdělaný Uzel {user?.uzel || 3}. Pojď do toho.
+              Máš rozdělaný Uzel {user?.uzel ?? 3}. Pojď do toho.
             </div>
           </div>
         );

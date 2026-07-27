@@ -74,6 +74,9 @@ export const useUserStore = create((set, get) => {
   } catch (e) {
     console.error('Failed parsing local user data', e);
   }
+  // Onboarding step must survive a full page reload — OAuth (Google/Discord) sign-in
+  // navigates away from the app entirely and back, wiping any in-memory-only state.
+  const localOnboardingStep = localStorage.getItem('onboardingStep') || 'splash';
 
   // Set up real-time subscription for Feed Posts
   let feedChannel = null;
@@ -120,7 +123,7 @@ export const useUserStore = create((set, get) => {
   return {
     // Auth & Onboarding State
     onboarded: localOnboarded,
-    onboardingStep: 'splash', // splash, intro, login, nickname, slib, reward
+    onboardingStep: localOnboardingStep, // splash, intro, login, nickname, slib, reward
     user: localUser || (localOnboarded ? DEFAULT_USER : null),
     feed: DEFAULT_FEED,
     leaderboard: DEFAULT_LEADERBOARD,
@@ -152,6 +155,7 @@ export const useUserStore = create((set, get) => {
 
     activeStoryNode: null,
     activeStoryNodeSteps: [],
+    allStoryNodes: [],
 
     // Notification list
     notifications: [
@@ -160,15 +164,18 @@ export const useUserStore = create((set, get) => {
     ],
 
     // Actions
-    setOnboardingStep: (step) => set({ onboardingStep: step }),
-    
+    setOnboardingStep: (step) => {
+      set({ onboardingStep: step });
+      localStorage.setItem('onboardingStep', step);
+    },
+
     nextOnboardingStep: () => {
       const step = get().onboardingStep;
-      if (step === 'splash') set({ onboardingStep: 'intro' });
-      else if (step === 'intro') set({ onboardingStep: 'login' });
-      else if (step === 'login') set({ onboardingStep: 'nickname' });
-      else if (step === 'nickname') set({ onboardingStep: 'slib' });
-      else if (step === 'slib') set({ onboardingStep: 'reward' });
+      if (step === 'splash') get().setOnboardingStep('intro');
+      else if (step === 'intro') get().setOnboardingStep('login');
+      else if (step === 'login') get().setOnboardingStep('nickname');
+      else if (step === 'nickname') get().setOnboardingStep('slib');
+      else if (step === 'slib') get().setOnboardingStep('reward');
     },
 
     loadCurrentNodeData: async () => {
@@ -262,6 +269,20 @@ export const useUserStore = create((set, get) => {
       }
     },
 
+    loadAllStoryNodes: async () => {
+      try {
+        const { data, error } = await supabase
+          .from('story_nodes')
+          .select('*')
+          .order('node_order', { ascending: true });
+
+        if (error) throw error;
+        set({ allStoryNodes: data || [] });
+      } catch (e) {
+        console.warn('Failed to load story node list from Supabase.', e);
+      }
+    },
+
     loadUnlockedCards: async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -313,10 +334,12 @@ export const useUserStore = create((set, get) => {
         name: randomName,
         keys_count: DEFAULT_USER.keys_count + 1,
         xp: 0,
+        uzel: 0,
         badges_count: 1
       };
       set({ user: newUser, onboardingStep: 'nickname' });
       localStorage.setItem('user', JSON.stringify(newUser));
+      localStorage.setItem('onboardingStep', 'nickname');
       get().loadCurrentNodeData();
       track('login', { method });
 
@@ -325,18 +348,9 @@ export const useUserStore = create((set, get) => {
         if (method === 'google' || method === 'discord') {
           await supabase.auth.signInWithOAuth({ provider: method });
         } else {
-          // Anonymous Sign In fallback
-          const { data } = await supabase.auth.signInAnonymously();
-          if (data?.user) {
-            // Provision user profile in Supabase
-            await supabase.from('profiles').insert([{
-              id: data.user.id,
-              email: data.user.email,
-              display_name: randomName,
-              xp: 0,
-              keys_balance: DEFAULT_USER.keys_count + 1
-            }]);
-          }
+          // Anonymous Sign In fallback — profile row provisioning is handled uniformly
+          // for every login method by handleOAuthSession() via the auth state listener.
+          await supabase.auth.signInAnonymously();
         }
       } catch (e) {
         console.warn('Supabase auth signin omitted, using local session.', e);
@@ -357,6 +371,7 @@ export const useUserStore = create((set, get) => {
       set({ user: updated, onboarded: true, onboardingStep: 'done' });
       localStorage.setItem('user', JSON.stringify(updated));
       localStorage.setItem('onboarded', 'true');
+      localStorage.removeItem('onboardingStep');
       get().updateUser({ xp: 10, keys_count: u.keys_count + 1 });
       get().loadCurrentNodeData();
       get().loadUnlockedCards();
@@ -366,6 +381,7 @@ export const useUserStore = create((set, get) => {
     resetProgress: () => {
       localStorage.removeItem('user');
       localStorage.removeItem('onboarded');
+      localStorage.removeItem('onboardingStep');
       localStorage.removeItem('proofsSubmittedCount');
       localStorage.removeItem('glitchMomentShown');
       set({
@@ -442,6 +458,8 @@ export const useUserStore = create((set, get) => {
         const keysReward = proofData.is_public ? (c ? c.reward_keys + 1 : 3) : (c ? c.reward_keys : 2);
         const newXp = u.xp + xpReward;
         const newKeys = u.keys_count + keysReward;
+        // TODO(klient): placeholder unlock rule (prvních 5 proofů = odznak). Čeká na
+        // finální tabulku 16 odznaků + unlock podmínky + rarity (HANDOFF.md §8.4/8.8).
         const badgeUnlocked = u.badges_count < 5;
         const newBadgesCount = badgeUnlocked ? u.badges_count + 1 : u.badges_count;
 
@@ -553,49 +571,35 @@ export const useUserStore = create((set, get) => {
 
     advanceNode: async () => {
       const u = get().user;
-      if (u) {
-        if (u.uzel === 3) {
-          set({ activeModal: 'node-complete' });
-        } else {
-          const updatedNode = Math.min(u.uzel + 1, 9);
-          const updated = { ...u, uzel: updatedNode };
-          set({ user: updated });
-          localStorage.setItem('user', JSON.stringify(updated));
-          set({ activeModal: null });
+      if (!u) return;
 
-          // Sync to Supabase
-          try {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (session) {
-              await supabase.from('profiles').update({ uzel: updatedNode }).eq('id', session.user.id);
-            }
-          } catch (e) {
-            console.warn('Failed syncing node advancement to database.', e);
-          }
-          track('node_completed', { node: updatedNode });
-          get().loadCurrentNodeData();
-        }
+      const allNodes = get().allStoryNodes;
+      const nextNode = allNodes.find(n => n.node_order === u.uzel + 1);
+
+      // Finale content (REFERENTIAL/FINAL node type) isn't built yet — hold at the
+      // last challenge node instead of advancing into a screen the UI can't render.
+      if (nextNode && (nextNode.type === 'REFERENTIAL' || nextNode.type === 'FINAL')) {
+        track('season_completed', { node: u.uzel });
+        set({ activeModal: null });
+        return;
       }
-    },
 
-    confirmNodeComplete: async () => {
-      const u = get().user;
-      if (u) {
-        const updated = { ...u, uzel: 4 };
-        set({ user: updated, activeModal: null });
-        localStorage.setItem('user', JSON.stringify(updated));
+      const updatedNode = nextNode ? nextNode.node_order : Math.min(u.uzel + 1, 9);
+      const updated = { ...u, uzel: updatedNode };
+      set({ user: updated, activeModal: null });
+      localStorage.setItem('user', JSON.stringify(updated));
 
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session) {
-            await supabase.from('profiles').update({ uzel: 4 }).eq('id', session.user.id);
-          }
-        } catch (e) {
-          console.warn('Failed syncing confirmNodeComplete to database.', e);
+      // Sync to Supabase
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          await supabase.from('profiles').update({ uzel: updatedNode }).eq('id', session.user.id);
         }
-        track('node_completed', { node: 4 });
-        get().loadCurrentNodeData();
+      } catch (e) {
+        console.warn('Failed syncing node advancement to database.', e);
       }
+      track('node_completed', { node: updatedNode });
+      get().loadCurrentNodeData();
     },
 
     addReaction: async (postId, type) => {
@@ -636,6 +640,7 @@ export const useUserStore = create((set, get) => {
     logout: async () => {
       localStorage.removeItem('user');
       localStorage.removeItem('onboarded');
+      localStorage.removeItem('onboardingStep');
       set({ user: null, onboarded: false, onboardingStep: 'splash', activeModal: null, activeStoryNode: null, activeStoryNodeSteps: [] });
       try {
         await supabase.auth.signOut();
@@ -669,7 +674,7 @@ export const useUserStore = create((set, get) => {
           const mappedUser = {
             name: data.display_name,
             xp: data.xp,
-            uzel: data.uzel || 3,
+            uzel: data.uzel ?? 0,
             streak: data.current_streak,
             keys_count: data.keys_balance,
             badges_count: data.avatar_level || 1,
@@ -688,6 +693,54 @@ export const useUserStore = create((set, get) => {
         }
       } catch (e) {
         console.warn('Supabase fetchUser failed, using local storage.');
+      }
+    },
+
+    // Called when a Supabase auth session appears (e.g. after the Google/Discord
+    // OAuth redirect completes, or anonymous sign-in). Handles two cases:
+    //   1. Returning user with an existing profiles row — just hydrate from it.
+    //   2. First real login for this identity — no row exists yet. This covers both
+    //      a brand-new signup mid-onboarding AND a long-time local-only player
+    //      (progress living only in this browser's localStorage) logging in for the
+    //      first time. Either way, the local user state is used to seed the new row
+    //      so accumulated local progress isn't silently lost on first login.
+    // Known limitation: only aggregate totals (xp/uzel/keys/badges/streak) migrate.
+    // Per-challenge completion history and unlocked card keys were never tracked
+    // locally in detail, so challenge_completions/user_cards/key_transactions can't
+    // be backfilled — those start fresh once the account is real.
+    handleOAuthSession: async (session) => {
+      if (!session?.user) return;
+      try {
+        const { data: existingProfile } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', session.user.id)
+          .maybeSingle();
+
+        if (existingProfile) {
+          // Returning user — the database is the source of truth from here on.
+          await get().fetchUser(session.user.id);
+        } else {
+          const u = get().user || DEFAULT_USER;
+          const { error: insertError } = await supabase.from('profiles').insert([{
+            id: session.user.id,
+            email: session.user.email,
+            display_name: u.name || DEFAULT_USER.name,
+            xp: u.xp ?? 0,
+            uzel: u.uzel ?? 0,
+            keys_balance: u.keys_count ?? DEFAULT_USER.keys_count,
+            current_streak: u.streak ?? 0,
+            avatar_level: u.badges_count ?? 0,
+            pledge: u.pledge || DEFAULT_USER.pledge,
+            pass_holder: u.passHolder || false,
+            discord_user_id: u.discord_user_id || null
+          }]);
+
+          if (insertError) throw insertError;
+          track('local_progress_migrated', { xp: u.xp, uzel: u.uzel, keys: u.keys_count, was_onboarded: get().onboarded });
+        }
+      } catch (e) {
+        console.warn('Failed to resolve OAuth session profile.', e);
       }
     }
   };

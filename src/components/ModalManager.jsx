@@ -24,7 +24,8 @@ export default function ModalManager() {
     resetProgress,
     login,
     unlockedCards,
-    proofsSubmittedCount
+    proofsSubmittedCount,
+    advanceNode
   } = useUserStore();
 
   // Onboarding text states
@@ -598,7 +599,7 @@ export default function ModalManager() {
             </div>
             
             <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#8B5CF6' }}>
-              Uzel {user?.uzel || 3} · Mikro-akce
+              Uzel {user?.uzel ?? 3} · Mikro-akce
             </div>
             <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '22px', marginTop: '6px', color: '#fff' }}>
               {activeChallenge.title}
@@ -1132,6 +1133,7 @@ export default function ModalManager() {
 
             <button
               onClick={() => {
+                advanceNode();
                 if (proofsSubmittedCount === 3 && !localStorage.getItem('glitchMomentShown')) {
                   localStorage.setItem('glitchMomentShown', 'true');
                   openModal('glitch-moment');
@@ -1234,6 +1236,8 @@ export default function ModalManager() {
                       priceId: process.env.REACT_APP_STRIPE_PRICE_ID || 'price_mock_founder_pass',
                       userId: session.user.id,
                       email: session.user.email,
+                      // TODO(klient): předpokládáme předplatné, nepotvrzeno — může být
+                      // i jednorázový nákup (HANDOFF.md §8.7/8.8).
                       type: 'SUBSCRIPTION',
                       successUrl: window.location.origin + '?payment=success',
                       cancelUrl: window.location.origin + '?payment=cancel'

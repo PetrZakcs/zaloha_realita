@@ -1,8 +1,16 @@
+import { Fragment, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { Flame, KeyRound, ArrowRight, Play, Lock, Crown, Check } from 'lucide-react';
 
 export default function MobileDashboard() {
-  const { user, activeChallenge, openModal } = useUserStore();
+  const { user, activeChallenge, allStoryNodes, loadAllStoryNodes } = useUserStore();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (allStoryNodes.length === 0) loadAllStoryNodes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div style={{
@@ -46,56 +54,65 @@ export default function MobileDashboard() {
       </div>
 
       {/* QUEST PATH */}
-      <div style={{ flexShrink: 0 }}>
-        <div style={{ display: 'flex', justifycontent: 'space-between', alignItems: 'center', marginBottom: '9px' }}>
-          <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#6B6B8A' }}>Sezóna 0 · cesta</span>
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', color: '#A78BFA' }}>Uzel {user?.uzel || 3} / 9</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          {/* Node 1 */}
-          <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#16351F', border: '1.5px solid #22C55E', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <span style={{ display: 'inline-flex', width: '13px', height: '13px', color: '#22C55E' }}><Check size={12} /></span>
+      {allStoryNodes.length > 0 && (
+        <div style={{ flexShrink: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '9px' }}>
+            <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#6B6B8A' }}>Sezóna 0 · cesta</span>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', color: '#A78BFA' }}>Uzel {user?.uzel || 0} / {allStoryNodes.length - 1}</span>
           </div>
-          <div style={{ flex: 1, height: '2px', background: '#22C55E' }}></div>
-          
-          {/* Node 2 */}
-          <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#16351F', border: '1.5px solid #22C55E', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <span style={{ display: 'inline-flex', width: '13px', height: '13px', color: '#22C55E' }}><Check size={12} /></span>
-          </div>
-          <div style={{ flex: 1, height: '2px', background: 'linear-gradient(90deg,#22C55E,#7C3AED)' }}></div>
-          
-          {/* Node 3 (Current) */}
-          <div 
-            onClick={() => openModal('collections')}
-            style={{ width: '30px', height: '30px', borderRadius: '50%', background: 'linear-gradient(135deg,#9333EA,#6D28D9)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }}
-          >
-            <span style={{ display: 'inline-flex', width: '15px', height: '15px', color: '#fff' }}><Play size={14} fill="#fff" /></span>
-          </div>
-          <div style={{ flex: 1, height: '2px', background: '#2A2142' }}></div>
-          
-          {/* Node 4 (Locked) */}
-          <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#1C1630', border: '1.5px solid #382C5C', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <span style={{ display: 'inline-flex', width: '11px', height: '11px', color: '#6B6B8A' }}><Lock size={10} /></span>
-          </div>
-          <div style={{ flex: 1, height: '2px', background: '#2A2142' }}></div>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            {allStoryNodes.map((node, idx) => {
+              const uzel = user?.uzel || 0;
+              const isDone = node.node_order < uzel;
+              const isCurrent = node.node_order === uzel;
+              const isBoss = node.type === 'REFERENTIAL' || node.type === 'FINAL';
+              const isLast = idx === allStoryNodes.length - 1;
 
-          {/* Node 5 (Locked) */}
-          <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#1C1630', border: '1.5px solid #382C5C', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <span style={{ display: 'inline-flex', width: '11px', height: '11px', color: '#6B6B8A' }}><Lock size={10} /></span>
-          </div>
-          <div style={{ flex: 1, height: '2px', background: '#2A2142' }}></div>
-          
-          {/* Boss Node */}
-          <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: '#2A1E10', border: '1.5px solid #F5B73F', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <span style={{ display: 'inline-flex', width: '13px', height: '13px', color: '#F5B73F' }}><Crown size={12} /></span>
+              let circle;
+              if (isBoss) {
+                circle = (
+                  <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: '#2A1E10', border: '1.5px solid #F5B73F', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <span style={{ display: 'inline-flex', width: '13px', height: '13px', color: '#F5B73F' }}><Crown size={12} /></span>
+                  </div>
+                );
+              } else if (isCurrent) {
+                circle = (
+                  <div
+                    onClick={() => navigate('/story')}
+                    style={{ width: '30px', height: '30px', borderRadius: '50%', background: 'linear-gradient(135deg,#9333EA,#6D28D9)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }}
+                  >
+                    <span style={{ display: 'inline-flex', width: '15px', height: '15px', color: '#fff' }}><Play size={14} fill="#fff" /></span>
+                  </div>
+                );
+              } else if (isDone) {
+                circle = (
+                  <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#16351F', border: '1.5px solid #22C55E', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <span style={{ display: 'inline-flex', width: '13px', height: '13px', color: '#22C55E' }}><Check size={12} /></span>
+                  </div>
+                );
+              } else {
+                circle = (
+                  <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#1C1630', border: `1.5px solid ${node.requires_pass ? '#F5B73F' : '#382C5C'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <span style={{ display: 'inline-flex', width: '11px', height: '11px', color: node.requires_pass ? '#F5B73F' : '#6B6B8A' }}><Lock size={10} /></span>
+                  </div>
+                );
+              }
+
+              return (
+                <Fragment key={node.id}>
+                  {circle}
+                  {!isLast && <div style={{ flex: 1, height: '2px', background: isDone ? '#22C55E' : '#2A2142' }}></div>}
+                </Fragment>
+              );
+            })}
           </div>
         </div>
-      </div>
+      )}
 
       {/* HERO CTA BUTTON */}
-      <div 
-        onClick={() => openModal('challenge-detail')}
-        className="sheen-wrap" 
+      <div
+        onClick={() => navigate('/story')}
+        className="sheen-wrap"
         style={{
           background: 'linear-gradient(135deg,#9333EA,#6D28D9)',
           borderRadius: '20px',
@@ -111,7 +128,7 @@ export default function MobileDashboard() {
           Pokračovat v příběhu
         </div>
         <div style={{ fontFamily: 'Inter', fontSize: '13px', color: 'rgba(255,255,255,.78)', marginTop: '6px', position: 'relative' }}>
-          Uzel {user?.uzel || 3} · Zaya čeká
+          Uzel {user?.uzel ?? 3} · Zaya čeká
         </div>
         <span style={{ position: 'absolute', right: 18, top: '50%', transform: 'translateY(-50%)', display: 'inline-flex', width: '26px', height: '26px', color: '#fff', zIndex: 1 }}>
           <ArrowRight size={22} />
@@ -119,50 +136,52 @@ export default function MobileDashboard() {
       </div>
 
       {/* DAILY CHALLENGE CARD */}
-      <div style={{
-        background: '#241C3C',
-        border: '0.5px solid #382C5C',
-        borderLeft: '3px solid #7C3AED',
-        borderRadius: '16px',
-        padding: '14px 16px',
-        flexShrink: 0
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#8B5CF6' }}>
-              Výzva {user?.uzel || 3} · Mikro-akce
+      {activeChallenge && (
+        <div style={{
+          background: '#241C3C',
+          border: '0.5px solid #382C5C',
+          borderLeft: '3px solid #7C3AED',
+          borderRadius: '16px',
+          padding: '14px 16px',
+          flexShrink: 0
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#8B5CF6' }}>
+                Výzva {user?.uzel ?? 3} · Mikro-akce
+              </div>
+              <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '16px', marginTop: '6px', color: '#F0F0F8' }}>
+                {activeChallenge.title}
+              </div>
+              <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#6B6B8A', marginTop: '4px' }}>
+                {activeChallenge.description}
+              </div>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '10px', background: '#1C1630', border: '0.5px solid #382C5C', borderRadius: '20px', padding: '3px 10px' }}>
+                <span style={{ display: 'inline-flex', width: '13px', height: '13px', color: '#F5B73F' }}><KeyRound size={12} /></span>
+                <span style={{ fontFamily: 'Inter', fontSize: '11px', color: '#F5B73F', fontWeight: '600' }}>+{activeChallenge.reward_keys} klíče</span>
+              </div>
             </div>
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '16px', marginTop: '6px', color: '#F0F0F8' }}>
-              {activeChallenge.title}
-            </div>
-            <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#6B6B8A', marginTop: '4px' }}>
-              {activeChallenge.description}
-            </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '10px', background: '#1C1630', border: '0.5px solid #382C5C', borderRadius: '20px', padding: '3px 10px' }}>
-              <span style={{ display: 'inline-flex', width: '13px', height: '13px', color: '#F5B73F' }}><KeyRound size={12} /></span>
-              <span style={{ fontFamily: 'Inter', fontSize: '11px', color: '#F5B73F', fontWeight: '600' }}>+{activeChallenge.reward_keys} klíče</span>
-            </div>
+            <button
+              onClick={() => navigate('/story')}
+              style={{
+                background: 'transparent',
+                border: '1px solid #7C3AED',
+                color: '#A78BFA',
+                fontFamily: 'Inter',
+                fontWeight: '600',
+                fontSize: '12px',
+                borderRadius: '8px',
+                height: '32px',
+                padding: '0 14px',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              Spustit
+            </button>
           </div>
-          <button 
-            onClick={() => openModal('challenge-detail')}
-            style={{
-              background: 'transparent',
-              border: '1px solid #7C3AED',
-              color: '#A78BFA',
-              fontFamily: 'Inter',
-              fontWeight: '600',
-              fontSize: '12px',
-              borderRadius: '8px',
-              height: '32px',
-              padding: '0 14px',
-              cursor: 'pointer',
-              whiteSpace: 'nowrap'
-            }}
-          >
-            Spustit
-          </button>
         </div>
-      </div>
+      )}
 
       {/* COMMUNITY PREVIEW */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

@@ -66,6 +66,7 @@ function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
         localStorage.setItem('userId', session.user.id);
+        useUserStore.getState().handleOAuthSession(session);
       }
     });
 
