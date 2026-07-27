@@ -162,7 +162,7 @@ export default function DesktopDashboard() {
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginTop: '14px', background: '#1C1630', border: '0.5px solid #382C5C', borderRadius: '20px', padding: '5px 12px', alignSelf: 'flex-start' }}>
             <span style={{ display: 'inline-flex', width: '14px', height: '14px', color: '#F5B73F' }}><KeyRound size={12} /></span>
             <span style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F5B73F', fontWeight: '600' }}>
-              +{activeChallenge.rewardKeys} klíče · +{activeChallenge.rewardXp} XP
+              +{activeChallenge.reward_keys} klíče · +{activeChallenge.reward_xp} XP
             </span>
           </div>
           <div style={{ flex: 1 }}></div>

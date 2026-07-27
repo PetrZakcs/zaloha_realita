@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useUserStore } from '../../store/userStore';
-import { SlidersHorizontal, Shield, Flame, Zap, Eye, Share2, ImageIcon, ChevronRight } from 'lucide-react';
+import { track } from '../../lib/analytics';
+import { SlidersHorizontal, Shield, Flame, CheckCircle2, Eye, Share2, ImageIcon, ChevronRight } from 'lucide-react';
 
 export default function MobileFeed() {
   const { feed, addReaction, openModal } = useUserStore();
@@ -110,14 +111,14 @@ export default function MobileFeed() {
                   <span onClick={() => addReaction(post.id, 'fire')} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#F5B73F', cursor: 'pointer' }}>
                     <span style={{ display: 'inline-flex', width: '16px', height: '16px' }}><Flame size={14} /></span>{post.reactions_fire}
                   </span>
-                  <span onClick={() => addReaction(post.id, 'lightning')} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#4AA8FF', cursor: 'pointer' }}>
-                    <span style={{ display: 'inline-flex', width: '16px', height: '16px' }}><Zap size={14} /></span>{post.reactions_lightning}
+                  <span onClick={() => addReaction(post.id, 'lightning')} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#22C55E', cursor: 'pointer' }}>
+                    <span style={{ display: 'inline-flex', width: '16px', height: '16px' }}><CheckCircle2 size={14} /></span>{post.reactions_lightning}
                   </span>
                   <span onClick={() => addReaction(post.id, 'eye')} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#A78BFA', cursor: 'pointer' }}>
                     <span style={{ display: 'inline-flex', width: '16px', height: '16px' }}><Eye size={14} /></span>{post.reactions_eye}
                   </span>
                   <span style={{ flex: 1 }}></span>
-                  <span onClick={() => openModal('paywall')} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#F0F0F8', cursor: 'pointer' }}>
+                  <span onClick={() => { track('share_clicked', { post_id: post.id }); openModal('paywall'); }} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#F0F0F8', cursor: 'pointer' }}>
                     <span style={{ display: 'inline-flex', width: '16px', height: '16px' }}><Share2 size={14} /></span>Sdílet
                   </span>
                 </div>
@@ -187,12 +188,16 @@ export default function MobileFeed() {
               {/* Photo Area */}
               <div style={{
                 height: '280px',
-                background: 'repeating-linear-gradient(135deg,#1C1630,#1C1630 10px,#241C3C 10px,#241C3C 20px)',
+                background: post.image_url
+                  ? `center / cover no-repeat url(${post.image_url})`
+                  : 'repeating-linear-gradient(135deg,#1C1630,#1C1630 10px,#241C3C 10px,#241C3C 20px)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center'
               }}>
-                <span style={{ display: 'inline-flex', width: '32px', height: '32px', color: '#3a3a55' }}><ImageIcon size={32} /></span>
+                {!post.image_url && (
+                  <span style={{ display: 'inline-flex', width: '32px', height: '32px', color: '#3a3a55' }}><ImageIcon size={32} /></span>
+                )}
               </div>
 
               {/* Caption and Interactions */}
@@ -204,14 +209,14 @@ export default function MobileFeed() {
                   <span onClick={() => addReaction(post.id, 'fire')} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#F5B73F', cursor: 'pointer' }}>
                     <span style={{ display: 'inline-flex', width: '16px', height: '16px' }}><Flame size={14} /></span>{post.reactions_fire}
                   </span>
-                  <span onClick={() => addReaction(post.id, 'lightning')} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#4AA8FF', cursor: 'pointer' }}>
-                    <span style={{ display: 'inline-flex', width: '16px', height: '16px' }}><Zap size={14} /></span>{post.reactions_lightning}
+                  <span onClick={() => addReaction(post.id, 'lightning')} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#22C55E', cursor: 'pointer' }}>
+                    <span style={{ display: 'inline-flex', width: '16px', height: '16px' }}><CheckCircle2 size={14} /></span>{post.reactions_lightning}
                   </span>
                   <span onClick={() => addReaction(post.id, 'eye')} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#A78BFA', cursor: 'pointer' }}>
                     <span style={{ display: 'inline-flex', width: '16px', height: '16px' }}><Eye size={14} /></span>{post.reactions_eye}
                   </span>
                   <span style={{ flex: 1 }}></span>
-                  <span onClick={() => openModal('paywall')} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#F0F0F8', cursor: 'pointer' }}>
+                  <span onClick={() => { track('share_clicked', { post_id: post.id }); openModal('paywall'); }} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#F0F0F8', cursor: 'pointer' }}>
                     <span style={{ display: 'inline-flex', width: '16px', height: '16px' }}><Share2 size={14} /></span>Sdílet
                   </span>
                 </div>

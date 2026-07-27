@@ -40,7 +40,7 @@ export default function AdminContentManager({ onClose }) {
         const { data, error } = await supabase
           .from('story_nodes')
           .select('*')
-          .order('order', { ascending: true });
+          .order('node_order', { ascending: true });
         if (error) throw error;
         setNodes(data || []);
         if (data && data.length > 0 && !selectedNode) {
@@ -96,7 +96,7 @@ export default function AdminContentManager({ onClose }) {
             .from('challenge_steps')
             .select('*')
             .eq('challenge_id', challengeData.id)
-            .order('order', { ascending: true });
+            .order('step_order', { ascending: true });
 
           setSteps(stepsData || []);
         } else {
@@ -141,7 +141,7 @@ export default function AdminContentManager({ onClose }) {
           const formattedSteps = steps.map((s, index) => ({
             id: s.id || `cs-${challenge.id}-${index}`,
             challenge_id: challenge.id,
-            order: index + 1,
+            step_order: index + 1,
             text: s.text
           }));
           const { error: stepsErr } = await supabase
@@ -166,7 +166,7 @@ export default function AdminContentManager({ onClose }) {
     const newNode = {
       id: 'n-node-' + nextOrder,
       theme_id: 't-env-reset',
-      order: nextOrder,
+      node_order: nextOrder,
       type: 'CHALLENGE',
       title: `Nový Uzel ${nextOrder}`,
       cutscene_text: 'Zadej text...',
@@ -461,7 +461,7 @@ export default function AdminContentManager({ onClose }) {
                       fontSize: '11px',
                       fontWeight: '700'
                     }}>
-                      {node.order}
+                      {node.node_order}
                     </div>
                     <div style={{ flex: 1, overflow: 'hidden' }}>
                       <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '13px', color: isSelected ? '#fff' : '#9A9AB5', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

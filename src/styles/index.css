@@ -38,6 +38,14 @@ html, body {
   100% { transform: translate(-50%, 0); opacity: 1; }
 }
 
+@keyframes glitchFlicker {
+  0%, 100% { opacity: 1; transform: translate(0, 0); }
+  20% { opacity: 0.4; transform: translate(-2px, 1px); }
+  40% { opacity: 1; transform: translate(2px, -1px); }
+  60% { opacity: 0.6; transform: translate(-1px, 0); }
+  80% { opacity: 1; transform: translate(1px, 1px); }
+}
+
 .dot-blink {
   display: inline-flex;
   align-items: center;

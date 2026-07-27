@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useUserStore } from '../../store/userStore';
-import { Flame, MessageCircle, ImageIcon, Plus } from 'lucide-react';
+import { Flame, CheckCircle2, ImageIcon, Plus } from 'lucide-react';
 
 export default function DesktopFeed() {
   const { feed, addReaction, openModal } = useUserStore();
@@ -149,12 +149,16 @@ export default function DesktopFeed() {
                 {isPhotoCard && (
                   <div style={{
                     height: '140px',
-                    background: 'repeating-linear-gradient(135deg,#1C1630,#1C1630 10px,#241C3C 10px,#241C3C 20px)',
+                    background: post.image_url
+                      ? `center / cover no-repeat url(${post.image_url})`
+                      : 'repeating-linear-gradient(135deg,#1C1630,#1C1630 10px,#241C3C 10px,#241C3C 20px)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center'
                   }}>
-                    <span style={{ display: 'inline-flex', width: '26px', height: '26px', color: '#4A3D6E' }}><ImageIcon size={26} /></span>
+                    {!post.image_url && (
+                      <span style={{ display: 'inline-flex', width: '26px', height: '26px', color: '#4A3D6E' }}><ImageIcon size={26} /></span>
+                    )}
                   </div>
                 )}
 
@@ -171,9 +175,12 @@ export default function DesktopFeed() {
                       <span style={{ display: 'inline-flex', width: '14px', height: '14px' }}><Flame size={14} /></span>
                       {post.reactions_fire}
                     </span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A' }}>
-                      <span style={{ display: 'inline-flex', width: '14px', height: '14px' }}><MessageCircle size={14} /></span>
-                      {post.reactions_lightning + 1}
+                    <span
+                      onClick={() => addReaction(post.id, 'lightning')}
+                      style={{ display: 'flex', alignItems: 'center', gap: '4px', fontFamily: 'Inter', fontSize: '11px', color: '#22C55E', cursor: 'pointer' }}
+                    >
+                      <span style={{ display: 'inline-flex', width: '14px', height: '14px' }}><CheckCircle2 size={14} /></span>
+                      {post.reactions_lightning}
                     </span>
                   </div>
                 </div>

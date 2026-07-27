@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useUserStore } from '../store/userStore';
 import { supabase } from '../api/supabaseClient';
+import { track } from '../lib/analytics';
 import { 
   X, Check, KeyRound, Lock, Crown, ArrowRight, Shield, Zap, 
-  ImageIcon, Globe, Mail, Bell, Sparkles, Loader2, Volume2, Info
+  ImageIcon, Globe, Mail, Bell, Sparkles, Loader2, Volume2
 } from 'lucide-react';
 
 export default function ModalManager() {
@@ -13,23 +14,27 @@ export default function ModalManager() {
     onboardingStep, 
     activeModal, 
     activeChallenge,
-    closeModal, 
-    openModal, 
-    nextOnboardingStep, 
+    closeModal,
+    openModal,
+    nextOnboardingStep,
     completeOnboarding,
     updateUser,
     submitProof,
     mockLogs,
     resetProgress,
     login,
-    unlockedCards
+    unlockedCards,
+    proofsSubmittedCount
   } = useUserStore();
 
   // Onboarding text states
   const [tempName, setTempName] = useState(user?.name || 'TemnýPozorovatel');
   const [tempPledge, setTempPledge] = useState('Jsem člověk, co přestal čekat a začal jednat.');
   const [textProof, setTextProof] = useState('Posbíral jsem odpadky u zastávky. Reálný zásah ✊');
-  const [publicToggle, setPublicToggle] = useState(true);
+  const [publicToggle, setPublicToggle] = useState(false);
+  const [proofMode, setProofMode] = useState('photo'); // 'photo' | 'text'
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState(null);
 
   // Sync temp name when user store updates
   useEffect(() => {
@@ -57,6 +62,23 @@ export default function ModalManager() {
       return () => clearInterval(timer);
     }
   }, [activeModal, user?.xp]);
+
+  // Reset the proof form each time the upload modal is (re)opened
+  useEffect(() => {
+    if (activeModal === 'proof-upload') {
+      setProofMode('photo');
+      setPhotoFile(null);
+      setPhotoPreviewUrl(null);
+      setTextProof('');
+    }
+  }, [activeModal]);
+
+  // Revoke the object URL when it changes or the component unmounts, to avoid leaking memory
+  useEffect(() => {
+    return () => {
+      if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    };
+  }, [photoPreviewUrl]);
 
   // If onboarded and no active modal, do not render anything
   if (onboarded && !activeModal) {
@@ -607,7 +629,7 @@ export default function ModalManager() {
               <div style={{ display: 'flex', gap: '8px' }}>
                 <div style={{ flex: 1, background: '#2A1E10', border: '1px solid #F5B73F', borderRadius: '12px', padding: '10px 4px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
                   <KeyRound size={16} style={{ color: '#F5B73F' }} />
-                  <span style={{ fontFamily: 'Inter', fontSize: '10px', color: '#F5B73F', fontWeight: '600' }}>+{activeChallenge.rewardKeys} klíče</span>
+                  <span style={{ fontFamily: 'Inter', fontSize: '10px', color: '#F5B73F', fontWeight: '600' }}>+{activeChallenge.reward_keys} klíče</span>
                 </div>
                 <div style={{ flex: 1, background: '#241a3d', border: '0.5px solid #7C3AED', borderRadius: '12px', padding: '10px 4px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
                   <Shield size={16} style={{ color: '#A78BFA' }} />
@@ -615,7 +637,7 @@ export default function ModalManager() {
                 </div>
                 <div style={{ flex: 1, background: '#14223D', border: '0.5px solid #4AA8FF', borderRadius: '12px', padding: '10px 4px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
                   <Zap size={16} style={{ color: '#4AA8FF' }} />
-                  <span style={{ fontFamily: 'Inter', fontSize: '10px', color: '#4AA8FF', fontWeight: '600' }}>+{activeChallenge.rewardXp} XP</span>
+                  <span style={{ fontFamily: 'Inter', fontSize: '10px', color: '#4AA8FF', fontWeight: '600' }}>+{activeChallenge.reward_xp} XP</span>
                 </div>
               </div>
             </div>
@@ -652,53 +674,117 @@ export default function ModalManager() {
               Odeslat důkaz akce
             </div>
             <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#9A9AB5', marginBottom: '14px' }}>
-              Dokonči úkol. Zadej textový popis nebo přilož fotku.
+              Dokonči úkol. Vyber jeden způsob důkazu — foto, nebo text.
             </div>
 
-            {/* Photo preview upload area */}
-            <div style={{
-              border: '1.5px dashed #7C3AED',
-              borderRadius: '16px',
-              height: '160px',
-              background: 'repeating-linear-gradient(135deg,#1C1630,#1C1630 10px,#241C3C 10px,#241C3C 20px)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px',
-              cursor: 'pointer',
-              position: 'relative'
-            }} onClick={() => alert('Foto přiloženo (simulace).')}>
-              <ImageIcon size={28} style={{ color: '#6B6B8A' }} />
-              <span style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A' }}>
-                VYBRAT NEBO VYFOTIT DŮKAZ
-              </span>
+            {/* Photo vs Text mode switch */}
+            <div style={{ display: 'flex', background: '#1C1630', borderRadius: '12px', padding: '3px', marginBottom: '14px' }}>
+              <button
+                onClick={() => setProofMode('photo')}
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  height: '34px',
+                  background: proofMode === 'photo' ? '#7C3AED' : 'transparent',
+                  color: proofMode === 'photo' ? '#fff' : '#6B6B8A',
+                  border: 'none',
+                  borderRadius: '9px',
+                  fontFamily: 'Inter',
+                  fontWeight: '600',
+                  fontSize: '12px',
+                  cursor: 'pointer'
+                }}
+              >
+                <ImageIcon size={13} /> Foto
+              </button>
+              <button
+                onClick={() => setProofMode('text')}
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  height: '34px',
+                  background: proofMode === 'text' ? '#7C3AED' : 'transparent',
+                  color: proofMode === 'text' ? '#fff' : '#6B6B8A',
+                  border: 'none',
+                  borderRadius: '9px',
+                  fontFamily: 'Inter',
+                  fontWeight: '600',
+                  fontSize: '12px',
+                  cursor: 'pointer'
+                }}
+              >
+                Text
+              </button>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '12px 0' }}>
-              <span style={{ flex: 1, height: '0.5px', background: '#382C5C' }}></span>
-              <span style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A' }}>nebo napsat text</span>
-              <span style={{ flex: 1, height: '0.5px', background: '#382C5C' }}></span>
-            </div>
-
-            <textarea 
-              value={textProof}
-              onChange={(e) => setTextProof(e.target.value)}
-              style={{
-                width: '100%',
-                height: '80px',
-                background: '#1C1630',
-                border: '0.5px solid #382C5C',
-                borderRadius: '12px',
-                padding: '10px',
-                fontFamily: 'Inter',
-                fontSize: '13px',
-                color: '#fff',
-                resize: 'none',
-                outline: 'none',
-                boxSizing: 'border-box'
-              }}
-            />
+            {proofMode === 'photo' ? (
+              <label
+                style={{
+                  border: '1.5px dashed #7C3AED',
+                  borderRadius: '16px',
+                  height: '160px',
+                  background: photoPreviewUrl
+                    ? `center / cover no-repeat url(${photoPreviewUrl})`
+                    : 'repeating-linear-gradient(135deg,#1C1630,#1C1630 10px,#241C3C 10px,#241C3C 20px)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  cursor: 'pointer',
+                  position: 'relative'
+                }}
+              >
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+                      setPhotoFile(file);
+                      setPhotoPreviewUrl(URL.createObjectURL(file));
+                    }
+                  }}
+                  style={{ display: 'none' }}
+                />
+                {!photoPreviewUrl && (
+                  <>
+                    <ImageIcon size={28} style={{ color: '#6B6B8A' }} />
+                    <span style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A' }}>
+                      VYBRAT NEBO VYFOTIT DŮKAZ
+                    </span>
+                  </>
+                )}
+              </label>
+            ) : (
+              <textarea
+                value={textProof}
+                onChange={(e) => setTextProof(e.target.value)}
+                placeholder="Popiš, co jsi udělal…"
+                style={{
+                  width: '100%',
+                  height: '160px',
+                  background: '#1C1630',
+                  border: '0.5px solid #382C5C',
+                  borderRadius: '12px',
+                  padding: '10px',
+                  fontFamily: 'Inter',
+                  fontSize: '13px',
+                  color: '#fff',
+                  resize: 'none',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              />
+            )}
 
             {/* Visibility Selector */}
             <div style={{ display: 'flex', background: '#1C1630', borderRadius: '12px', padding: '3px', marginTop: '14px' }}>
@@ -746,24 +832,26 @@ export default function ModalManager() {
               </button>
             </div>
 
-            <button 
+            <button
+              disabled={proofMode === 'photo' ? !photoFile : !textProof.trim()}
               onClick={() => {
                 submitProof({
-                  text: textProof,
+                  text: proofMode === 'text' ? textProof : '',
+                  photoFile: proofMode === 'photo' ? photoFile : null,
                   is_public: publicToggle
                 });
               }}
               style={{
                 width: '100%',
                 height: '46px',
-                background: '#22C55E',
-                color: '#fff',
+                background: (proofMode === 'photo' ? !photoFile : !textProof.trim()) ? '#2E4A38' : '#22C55E',
+                color: (proofMode === 'photo' ? !photoFile : !textProof.trim()) ? '#6B6B8A' : '#fff',
                 fontFamily: 'Inter',
                 fontWeight: '700',
                 fontSize: '15px',
                 border: 'none',
                 borderRadius: '16px',
-                cursor: 'pointer',
+                cursor: (proofMode === 'photo' ? !photoFile : !textProof.trim()) ? 'not-allowed' : 'pointer',
                 marginTop: '16px',
                 display: 'flex',
                 alignItems: 'center',
@@ -772,6 +860,68 @@ export default function ModalManager() {
               }}
             >
               Dokončit a odeslat <ArrowRight size={16} />
+            </button>
+          </div>
+        )}
+
+        {/* MODAL 2.5: Glitch Moment (secret mystery reward after 3rd proof) */}
+        {activeModal === 'glitch-moment' && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+            <div style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '11px',
+              letterSpacing: '.12em',
+              color: '#22C55E',
+              textTransform: 'uppercase',
+              animation: 'glitchFlicker 0.4s steps(2, end) 4'
+            }}>
+              SYSTÉMOVÁ ANOMÁLIE DETEKOVÁNA
+            </div>
+
+            <div style={{
+              width: '100%',
+              background: '#0B0A12',
+              border: '1px solid #22C55E',
+              borderRadius: '12px',
+              padding: '16px',
+              marginTop: '18px',
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '12px',
+              color: '#22C55E',
+              lineHeight: '1.7',
+              textAlign: 'left',
+              boxShadow: '0 0 20px rgba(34,197,94,.25)'
+            }}>
+              &gt; GL_TCH://SIGNAL_DETECTED<br />
+              &gt; ...někdo sleduje tvůj postup mimo systém Zaya...<br />
+              &gt; ...3 zásahy potvrzeny. Vrstva reality se na okamžik odkryla...<br />
+              &gt; FRAGMENT_KÓDU_03: <span style={{ color: '#fff' }}>„NPC to nevidí. Ty ano.“</span>
+            </div>
+
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '20px', color: '#fff', marginTop: '18px' }}>
+              Fragment kódu získán.
+            </div>
+            <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', marginTop: '6px', lineHeight: '1.5' }}>
+              Udrž streak <span style={{ color: '#22C55E', fontWeight: '600' }}>3 dny</span> a odemkneš další fragment.
+            </div>
+
+            <button
+              onClick={closeModal}
+              style={{
+                width: '100%',
+                height: '46px',
+                background: '#22C55E',
+                color: '#0B0A12',
+                fontFamily: 'Inter',
+                fontWeight: '700',
+                fontSize: '15px',
+                border: 'none',
+                borderRadius: '16px',
+                cursor: 'pointer',
+                marginTop: '22px'
+              }}
+            >
+              Zavřít
             </button>
           </div>
         )}
@@ -980,8 +1130,15 @@ export default function ModalManager() {
               </div>
             </div>
 
-            <button 
-              onClick={closeModal}
+            <button
+              onClick={() => {
+                if (proofsSubmittedCount === 3 && !localStorage.getItem('glitchMomentShown')) {
+                  localStorage.setItem('glitchMomentShown', 'true');
+                  openModal('glitch-moment');
+                } else {
+                  closeModal();
+                }
+              }}
               style={{
                 width: '100%',
                 height: '46px',
@@ -1054,12 +1211,14 @@ export default function ModalManager() {
               </div>
             </div>
 
-            <button 
+            <button
               onClick={async () => {
+                track('pass_checkout_started');
                 try {
                   const { data: { session } } = await supabase.auth.getSession();
                   if (!session) {
                     updateUser({ passHolder: true });
+                    track('pass_activated', { mode: 'simulation_no_session' });
                     alert('Simulace: Hra Pass byl úspěšně aktivován (nejsi přihlášen přes Supabase Auth).');
                     closeModal();
                     return;
@@ -1090,6 +1249,7 @@ export default function ModalManager() {
                 } catch (err) {
                   console.warn('Stripe checkout call failed, fallback to simulation.', err);
                   updateUser({ passHolder: true });
+                  track('pass_activated', { mode: 'simulation_stripe_unavailable' });
                   alert('Brána Stripe není nakonfigurována, aktivována simulace Hra Passu.');
                   closeModal();
                 }
@@ -1367,14 +1527,6 @@ export default function ModalManager() {
                         </div>
                       </div>
                     ))}
-                  </div>
-                </div>
-
-                {/* Client Placeholders Note */}
-                <div style={{ background: 'rgba(245,183,63,.06)', border: '1px dashed #F5B73F', borderRadius: '12px', padding: '10px', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
-                  <Info size={14} style={{ color: '#F5B73F', flexShrink: 0, marginTop: '2px' }} />
-                  <div style={{ fontFamily: 'Inter', fontSize: '10px', color: '#9A9AB5', lineHeight: '1.4' }}>
-                    <span style={{ color: '#F5B73F', fontWeight: 'bold' }}>Poznámka klienta (TODO):</span> Možnost nákupu artefaktů / odznaků za klíče a doplňkové herní mechaniky budou definovány v MVP3.
                   </div>
                 </div>
               </div>

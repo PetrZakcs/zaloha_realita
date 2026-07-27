@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { useEffect } from 'react';
 import { supabase } from './api/supabaseClient';
+import { track } from './lib/analytics';
 import { useUserStore } from './store/userStore';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
@@ -67,6 +68,8 @@ function App() {
         localStorage.setItem('userId', session.user.id);
       }
     });
+
+    track('app_opened', { date: new Date().toISOString().slice(0, 10) });
 
     return () => subscription.unsubscribe();
   }, []);

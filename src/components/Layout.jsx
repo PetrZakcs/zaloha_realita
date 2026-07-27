@@ -1,27 +1,29 @@
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { useUserStore } from '../store/userStore';
-import { 
-  Home as HomeIcon, 
-  MessageSquareText, 
-  LayoutGrid, 
-  Trophy, 
-  User as UserIcon, 
-  Flame, 
-  KeyRound, 
-  Bell, 
-  Settings, 
+import { track } from '../lib/analytics';
+import {
+  Home as HomeIcon,
+  MessageSquareText,
+  LayoutGrid,
+  Trophy,
+  User as UserIcon,
+  Flame,
+  KeyRound,
+  Bell,
+  Settings,
   Crown,
   Signal,
   Wifi,
-  BatteryMedium
+  BatteryMedium,
+  Sparkles
 } from 'lucide-react';
 import ModalManager from './ModalManager';
 
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, onboarded, openModal, addReaction } = useUserStore();
+  const { user, onboarded, activeModal, openModal, addReaction } = useUserStore();
   const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
 
   useEffect(() => {
@@ -36,12 +38,15 @@ export default function Layout() {
   }
 
   const nav = [
-    { icon: <HomeIcon size={20} />, label: 'Domů', path: '/' },
-    { icon: <MessageSquareText size={20} />, label: 'Příběh', path: '/story' },
-    { icon: <LayoutGrid size={20} />, label: 'Feed', path: '/feed' },
-    { icon: <Trophy size={20} />, label: 'Žebříček', path: '/leaderboard' },
-    { icon: <UserIcon size={20} />, label: 'Profil', path: '/profile' },
+    { id: 'home', icon: <HomeIcon size={20} />, label: 'Domů', path: '/' },
+    { id: 'story', icon: <MessageSquareText size={20} />, label: 'Příběh', path: '/story' },
+    { id: 'feed', icon: <LayoutGrid size={20} />, label: 'Feed', path: '/feed' },
+    { id: 'artefakty', icon: <Sparkles size={20} />, label: 'Artefakty', action: () => openModal('collections') },
+    { id: 'leaderboard', icon: <Trophy size={20} />, label: 'Žebříček', path: '/leaderboard' },
+    { id: 'profile', icon: <UserIcon size={20} />, label: 'Profil', path: '/profile' },
   ];
+
+  const isNavItemActive = (item) => item.path ? location.pathname === item.path : item.id === 'artefakty' && activeModal === 'collections';
 
   // Helper to resolve desktop header title based on route
   const getDesktopTitle = () => {
@@ -160,7 +165,7 @@ export default function Layout() {
                 </svg>
               </span>
               <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '15px' }}>
-                HRA <span style={{ color: '#A78BFA' }}>REALITY</span>
+                iWau HRA <span style={{ color: '#A78BFA' }}>REALITY</span>
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -175,7 +180,7 @@ export default function Layout() {
                   borderRadius: '7px',
                   padding: '4px 8px',
                   cursor: 'pointer'
-                }} onClick={() => openModal('paywall')}>
+                }} onClick={() => { track('paywall_opened', { source: 'header_badge_active' }); openModal('paywall'); }}>
                   PASS
                 </span>
               ) : (
@@ -188,7 +193,7 @@ export default function Layout() {
                   borderRadius: '7px',
                   padding: '4px 8px',
                   cursor: 'pointer'
-                }} onClick={() => openModal('paywall')}>
+                }} onClick={() => { track('paywall_opened', { source: 'header_badge_upsell' }); openModal('paywall'); }}>
                   + PASS
                 </span>
               )}
@@ -225,12 +230,13 @@ export default function Layout() {
             backdropFilter: 'blur(8px)',
             flexShrink: 0
           }}>
-            {nav.map(({ icon, label, path }) => {
-              const active = location.pathname === path;
+            {nav.map((item) => {
+              const { icon, label, path, action } = item;
+              const active = isNavItemActive(item);
               return (
                 <button
-                  key={path}
-                  onClick={() => navigate(path)}
+                  key={item.id}
+                  onClick={() => action ? action() : navigate(path)}
                   style={{
                     background: active ? 'radial-gradient(circle, rgba(124,58,237,.38), rgba(124,58,237,.08) 72%)' : 'transparent',
                     boxShadow: active ? '0 0 16px rgba(124,58,237,.4)' : 'none',
@@ -311,12 +317,13 @@ export default function Layout() {
 
             {/* Navigation Tabs */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              {nav.map(({ icon, label, path }) => {
-                const active = location.pathname === path;
+              {nav.map((item) => {
+                const { icon, label, path, action } = item;
+                const active = isNavItemActive(item);
                 return (
                   <button
-                    key={path}
-                    onClick={() => navigate(path)}
+                    key={item.id}
+                    onClick={() => action ? action() : navigate(path)}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -365,7 +372,7 @@ export default function Layout() {
               padding: '14px',
               marginBottom: '14px',
               cursor: 'pointer'
-            }} onClick={() => openModal('paywall')}>
+            }} onClick={() => { track('paywall_opened', { source: 'sidebar_banner' }); openModal('paywall'); }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
                 <span style={{ display: 'inline-flex', width: '16px', height: '16px', color: '#F5B73F' }}><Crown size={14} /></span>
                 <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '13px', color: '#F5B73F' }}>HRA PASS</span>

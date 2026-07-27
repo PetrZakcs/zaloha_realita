@@ -140,7 +140,7 @@ export default function MobileDashboard() {
             </div>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '10px', background: '#1C1630', border: '0.5px solid #382C5C', borderRadius: '20px', padding: '3px 10px' }}>
               <span style={{ display: 'inline-flex', width: '13px', height: '13px', color: '#F5B73F' }}><KeyRound size={12} /></span>
-              <span style={{ fontFamily: 'Inter', fontSize: '11px', color: '#F5B73F', fontWeight: '600' }}>+{activeChallenge.rewardKeys} klíče</span>
+              <span style={{ fontFamily: 'Inter', fontSize: '11px', color: '#F5B73F', fontWeight: '600' }}>+{activeChallenge.reward_keys} klíče</span>
             </div>
           </div>
           <button 

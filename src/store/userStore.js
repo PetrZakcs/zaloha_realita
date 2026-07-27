@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { supabase } from '../api/supabaseClient';
+import { track } from '../lib/analytics';
 
 const DEFAULT_USER = {
   name: 'TemnýPozorovatel',
@@ -88,6 +89,7 @@ export const useUserStore = create((set, get) => {
               user_name: payload.new.user_name,
               rarity: 'Rare', // Default rarity mapping
               content: payload.new.content,
+              image_url: payload.new.image_url || null,
               reactions_fire: payload.new.reactions_fire || 0,
               reactions_lightning: payload.new.reactions_lightning || 0,
               reactions_eye: payload.new.reactions_eye || 0,
@@ -124,6 +126,7 @@ export const useUserStore = create((set, get) => {
     leaderboard: DEFAULT_LEADERBOARD,
     loading: false,
     unlockedCards: [],
+    proofsSubmittedCount: parseInt(localStorage.getItem('proofsSubmittedCount') || '0', 10),
 
     // Navigation & Overlay Modal Queue
     activeModal: null, // challenge-detail, upload-proof, analyzing, reward-reveal, r1-xp-toast, r2-badge-unlock, r3-key-claim, node-complete, settings, notifications, edit-profile, paywall, collections, streak-claim
@@ -136,8 +139,8 @@ export const useUserStore = create((set, get) => {
       type: 'Environmentální reset',
       category: 'Výzva 3 · Mikro-akce',
       description: 'Jeden mikro-zásah do reality. Do 15 minut. Najdi 3 odhozené kusy odpadu, seber je a vyhoď do koše.',
-      rewardXp: 50,
-      rewardKeys: 2
+      reward_xp: 50,
+      reward_keys: 2
     },
     storyDialogStep: 0,
     storyDialogs: [
@@ -177,7 +180,7 @@ export const useUserStore = create((set, get) => {
         const { data: nodeData, error: nodeError } = await supabase
           .from('story_nodes')
           .select('*')
-          .eq('order', u.uzel)
+          .eq('node_order', u.uzel)
           .single();
 
         if (nodeError) throw nodeError;
@@ -187,7 +190,7 @@ export const useUserStore = create((set, get) => {
 
           // 2. Fetch dialogs for this node dynamically
           const dynamicDialogs = [
-            { sender: 'zaya', text: nodeData.cutscene_text, sys: `GL_TCH://NODE_0${nodeData.order}_ACTIVE` }
+            { sender: 'zaya', text: nodeData.cutscene_text, sys: `GL_TCH://NODE_0${nodeData.node_order}_ACTIVE` }
           ];
           
           if (nodeData.type === 'CHALLENGE') {
@@ -219,7 +222,7 @@ export const useUserStore = create((set, get) => {
                 .from('challenge_steps')
                 .select('*')
                 .eq('challenge_id', challengeData.id)
-                .order('order', { ascending: true });
+                .order('step_order', { ascending: true });
 
               set({ activeStoryNodeSteps: stepsData || [] });
             }
@@ -315,6 +318,7 @@ export const useUserStore = create((set, get) => {
       set({ user: newUser, onboardingStep: 'nickname' });
       localStorage.setItem('user', JSON.stringify(newUser));
       get().loadCurrentNodeData();
+      track('login', { method });
 
       // Trigger anonymous or social sign in in Supabase if supported
       try {
@@ -356,20 +360,24 @@ export const useUserStore = create((set, get) => {
       get().updateUser({ xp: 10, keys_count: u.keys_count + 1 });
       get().loadCurrentNodeData();
       get().loadUnlockedCards();
+      track('onboarding_completed');
     },
 
     resetProgress: () => {
       localStorage.removeItem('user');
       localStorage.removeItem('onboarded');
-      set({ 
-        user: null, 
-        onboarded: false, 
-        onboardingStep: 'splash', 
+      localStorage.removeItem('proofsSubmittedCount');
+      localStorage.removeItem('glitchMomentShown');
+      set({
+        user: null,
+        onboarded: false,
+        onboardingStep: 'splash',
         activeModal: null,
         storyDialogStep: 0,
         dialogCompleted: false,
         activeStoryNode: null,
-        activeStoryNodeSteps: []
+        activeStoryNodeSteps: [],
+        proofsSubmittedCount: 0
       });
     },
 
@@ -393,10 +401,35 @@ export const useUserStore = create((set, get) => {
 
     submitProof: async (proofData) => {
       set({ activeModal: 'mock-loader', mockLogs: ['Inicializace Zaya_SYS...'] });
-      
+
       await new Promise(r => setTimeout(r, 450));
       set(s => ({ mockLogs: [...s.mockLogs, 'Kontrola GPS koordinátů...'] }));
       await new Promise(r => setTimeout(r, 550));
+
+      // Upload proof photo to Supabase Storage, if provided
+      let imageUrl = null;
+      if (proofData.photoFile) {
+        set(s => ({ mockLogs: [...s.mockLogs, 'Nahrávání fotografie...'] }));
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            const ext = proofData.photoFile.name.split('.').pop() || 'jpg';
+            const path = `${session.user.id}/${Date.now()}.${ext}`;
+            const { error: uploadError } = await supabase.storage
+              .from('proofs')
+              .upload(path, proofData.photoFile);
+            if (!uploadError) {
+              const { data: publicUrlData } = supabase.storage.from('proofs').getPublicUrl(path);
+              imageUrl = publicUrlData?.publicUrl || null;
+            } else {
+              console.warn('Photo upload failed, continuing without image.', uploadError);
+            }
+          }
+        } catch (e) {
+          console.warn('Photo upload failed, continuing without image.', e);
+        }
+      }
+
       set(s => ({ mockLogs: [...s.mockLogs, 'Skenování okolních objektů...'] }));
       await new Promise(r => setTimeout(r, 500));
       set(s => ({ mockLogs: [...s.mockLogs, 'Ověření reálnosti: 100% OK'] }));
@@ -431,6 +464,7 @@ export const useUserStore = create((set, get) => {
               user_id: session.user.id,
               user_name: u.name,
               content: proofData.text || 'Prokázal jsem, že nejsem NPC! 🟢',
+              image_url: imageUrl,
               is_public: proofData.is_public
             }]);
 
@@ -492,6 +526,7 @@ export const useUserStore = create((set, get) => {
           user_name: u.name,
           rarity: u.rarity,
           content: proofData.text || 'Prokázal jsem, že nejsem NPC! 🟢',
+          image_url: imageUrl,
           reactions_fire: 0,
           reactions_lightning: 0,
           reactions_eye: 0,
@@ -500,6 +535,18 @@ export const useUserStore = create((set, get) => {
         };
         set(state => ({ feed: [newFeedItem, ...state.feed] }));
       }
+
+      // Track proof count for the Glitch Moment mystery reward, surfaced at the end of the celebration chain
+      const proofsSubmitted = get().proofsSubmittedCount + 1;
+      set({ proofsSubmittedCount: proofsSubmitted });
+      localStorage.setItem('proofsSubmittedCount', String(proofsSubmitted));
+
+      track('proof_submitted', {
+        proof_number: proofsSubmitted,
+        node: u?.uzel,
+        is_public: proofData.is_public,
+        has_photo: !!proofData.photoFile
+      });
 
       set({ activeModal: 'success-overlay' });
     },
@@ -525,6 +572,7 @@ export const useUserStore = create((set, get) => {
           } catch (e) {
             console.warn('Failed syncing node advancement to database.', e);
           }
+          track('node_completed', { node: updatedNode });
           get().loadCurrentNodeData();
         }
       }
@@ -545,6 +593,7 @@ export const useUserStore = create((set, get) => {
         } catch (e) {
           console.warn('Failed syncing confirmNodeComplete to database.', e);
         }
+        track('node_completed', { node: 4 });
         get().loadCurrentNodeData();
       }
     },
