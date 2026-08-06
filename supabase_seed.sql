@@ -1,36 +1,27 @@
--- iWAU / Hra Reality — Illustrative Seed Data for Theme: Environmentální reset (Nodes 0-8)
--- Run this in the Supabase SQL Editor to populate the story and challenge contents.
+-- iWAU / Hra Reality — Complete Season 0 Story & Challenge Seed Data (Nodes 1-9)
+-- Execute in Supabase SQL Editor to populate story_nodes, challenges, and challenge_steps.
 
 -- 1. Insert Theme
 INSERT INTO public.themes (id, slug, name, description, theme_order, is_active)
 VALUES (
   't-env-reset', 
-  'environmentalni-reset', 
-  'Environmentální reset', 
-  'Jeden mikro-zásah do reality. Ozdrav své okolí i mysl.', 
+  'season-0-probuzeni', 
+  'Season 0 · Probuzení Doera', 
+  '9 uzlů pro prolomení autopilota reality a vybudování postavy v reálném světě.', 
   1, 
   TRUE
 ) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description;
 
--- 2. Insert Story Nodes (Nodes 0 to 8)
+-- 2. Insert Story Nodes (Nodes 1 to 9)
 INSERT INTO public.story_nodes (id, theme_id, node_order, type, title, cutscene_text, requires_pass)
 VALUES 
-(
-  'n-intro', 
-  't-env-reset', 
-  0, 
-  'INTRO', 
-  'Volání Zaya', 
-  'Vítej. Okolo tebe je šum. Lidé na ulicích chodí jako spící NPC, uzavření ve svých mobilech a myšlenkách. Tvým prvním úkolem je zastavit se a začít vnímat realitu. Jsi připraven na skutečné probuzení?', 
-  FALSE
-),
 (
   'n-node-1', 
   't-env-reset', 
   1, 
   'CHALLENGE', 
-  'První zastavení', 
-  'Výborně. Uzel 1 se aktivuje. Tvá první výzva: Zastav se a po dobu 3 minut nic nedělej. Pouze pozoruj svět okolo sebe bez koukání do mobilu. Napiš mi sem, co tě během této chvíle napadlo.', 
+  'Uzel 1 · Zastavení Autopilota', 
+  'Většina lidí kolem tebe dnes neudělá nic nového. Budou pasivně skrolovat, dokud den neskončí. Ty jsi tady, protože jsi se rozhodl probudit. Zastav se a na 3 minuty pouze pozoruj světa bez obrazovky.', 
   FALSE
 ),
 (
@@ -38,8 +29,8 @@ VALUES
   't-env-reset', 
   2, 
   'CHALLENGE', 
-  'Digitální detox', 
-  'Uzel 2. Lidé tráví průměrně 6 hodin denně na displejích. Dokážeš dnes odložit telefon na 2 hodiny? Jako důkaz popiš, čemu jsi se během té doby věnoval.', 
+  'Uzel 2 · Signal Cut (Detox)', 
+  'Uzel 2 se aktivuje. Průměrný člověk stráví 6 hodin denně pohledem do skla. Vypni notifikace, odlož displej na 45 minut a vyfoť analogový prostor okolo sebe.', 
   FALSE
 ),
 (
@@ -47,8 +38,8 @@ VALUES
   't-env-reset', 
   3, 
   'CHALLENGE', 
-  'Prokaž, že nejsi NPC', 
-  'Uzel 3 se aktivuje. Tvoje výzva: "Prokaž, že nejsi NPC". Najdi venku 3 odhozené kusy odpadu, seber je a vyhoď do koše. Tímto malým činem změníš realitu a ukážeš, že jednáš.', 
+  'Uzel 3 · Prokaž, že nejsi NPC', 
+  'Jsi připraven na fyzický krok v reálném světě. Najdi 3 odhozené kusy odpadu, seber je a vyhoď do koše. Malým činem dokážeš svému mozku, že jsi aktivní tvůrce prostředí.', 
   FALSE
 ),
 (
@@ -56,17 +47,17 @@ VALUES
   't-env-reset', 
   4, 
   'CHALLENGE', 
-  'Hluboký nádech', 
-  'Uzel 4 (HRA PASS). Vyjdi do přírody. Najdi strom, dotkni se ho a zhluboka se nadechni. Vyfoť strom jako důkaz tvého spojení s realitou.', 
-  TRUE
+  'Uzel 4 · Hlas v Mrtvém Pásmu', 
+  'Lidé zapomněli na reálné vazby. Pošli upřímnou zprávu starému příteli, se kterým jsi nemluvil přes 3 měsíce, nebo pozdrav člověka ve tvém okolí s očním kontaktem.', 
+  FALSE
 ),
 (
   'n-node-5', 
   't-env-reset', 
   5, 
   'CHALLENGE', 
-  'Knihovna moudrosti', 
-  'Uzel 5 (HRA PASS). Navštiv nejbližší knihovnu nebo knihkupectví. Najdi knihu, která tě zaujme, otevři ji na náhodné stránce a přečti si jednu větu. Přeneseš ji sem?', 
+  'Uzel 5 · Fyzická Hrana', 
+  'Tvoje tělo určuje tvůj stav. Dnes dáš svému systému chladný restart. Dej si 2 minuty ledové sprchy nebo splň 50 kliků/dřepů rozložených během dne.', 
   TRUE
 ),
 (
@@ -74,8 +65,8 @@ VALUES
   't-env-reset', 
   6, 
   'CHALLENGE', 
-  'Zpráva příteli', 
-  'Uzel 6 (HRA PASS). Napiš kamarádovi nebo známému, se kterým jsi dlouho nemluvil. Pošli mu upřímnou zprávu, jak se má. Vyfoť nebo popiš jeho reakci.', 
+  'Uzel 6 · Analogový Otisk', 
+  'AI tvoří obrázky a kódy, ale ty tvoříš v reálném světě. Napiš ručně na papír 3 životní zásady nebo nakresli rychlou skicu bez použiití počítače.', 
   TRUE
 ),
 (
@@ -83,17 +74,26 @@ VALUES
   't-env-reset', 
   7, 
   'CHALLENGE', 
-  'Ranní východ', 
-  'Uzel 7 (HRA PASS). Vzbuď se zítra s východem slunce. Udělej pár kroků na čerstvém vzduchu a popiš ten pocit nového dne.', 
+  'Uzel 7 · Architekt Dobra', 
+  'Vygeneruj dobro v prostředí bez nároku na odměnu. Zaplať kávu neznámému člověku nebo nech na veřejném místě pozitivní ručně psaný vzkaz.', 
   TRUE
 ),
 (
-  'n-final', 
+  'n-node-8', 
   't-env-reset', 
   8, 
-  'REFERENTIAL', 
-  'Ohlédnutí do zrcadla', 
-  'Dosáhl jsi konce první sezóny. Dokončil jsi integrační cyklus. Jak moc se tvůj pohled na realitu za tento týden změnil?', 
+  'CHALLENGE', 
+  'Uzel 8 · Pozorovatel Sítě', 
+  'Vyjdi ven na 30 minut bez sluchátek a bez zadaného cílů. Pozoruj rytmus města či přírody a vyfoť jeden unikátní architektonický nebo přírodní detail.', 
+  TRUE
+),
+(
+  'n-node-9', 
+  't-env-reset', 
+  9, 
+  'FINAL', 
+  'Uzel 9 · Boss Fight: Prolomení Sítě ZAYA', 
+  'Finální zkouška Season 0. Udělej celodenní reset: 24 hodin bez sociálních sítí, 10 000 kroků v reálu a splnění 1 dobrého skutku. Tímto dokončíš Season 0 a odemkneš kartu DOER MVP-1.', 
   FALSE
 ) ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, cutscene_text = EXCLUDED.cutscene_text, requires_pass = EXCLUDED.requires_pass;
 
@@ -105,22 +105,22 @@ VALUES
   'n-node-1', 
   '3 minuty ticha', 
   'Zastav se a po dobu 3 minut pouze pozoruj okolí bez koukání do mobilu.', 
-  'Uvědomíš si, kolik detailů ti denně uniká.', 
+  'Uvědomíš si, kolik detailů ti denně uniká v autopilotu.', 
   'TEXT', 
   180, 
   1, 
-  10
+  25
 ),
 (
   'c-node-2', 
   'n-node-2', 
-  'Odlož displej', 
-  'Odlož telefon na 2 hodiny a popiš, co jsi dělal.', 
-  'Zjistíš, kolik času máš, když nejsi připoutaný k obrazovce.', 
-  'TEXT', 
-  7200, 
-  1, 
-  15
+  'Signal Cut', 
+  'Odlož telefon na 45 minut, vypni notifikace a vyfoť analogové zátiší.', 
+  'Získáš zpět svou pozornost a klid v mysli.', 
+  'PHOTO', 
+  2700, 
+  2, 
+  40
 ),
 (
   'c-npc-challenge', 
@@ -136,53 +136,85 @@ VALUES
 (
   'c-node-4', 
   'n-node-4', 
-  'Spojení se stromem', 
-  'Najdi strom, dotkni se ho a zhluboka se nadechni. Vyfoť strom jako důkaz.', 
-  'Uzemníš se a uklidníš svou mysl.', 
-  'PHOTO', 
-  1800, 
-  2, 
-  40
+  'Hlas v Mrtvém Pásmu', 
+  'Napiš upřímnou zprávu příteli, se kterým jsi nemluvil déle než 3 měsíce.', 
+  'Obnovíš reálné lidské spojení v odosobněné době.', 
+  'TEXT', 
+  3600, 
+  3, 
+  75
 ),
 (
   'c-node-5', 
   'n-node-5', 
-  'Náhodná moudrost', 
-  'Otevři knihu na náhodné stránce a opiš jednu větu.', 
-  'Najdeš myšlenku, kterou jsi v tuto chvíli možná potřeboval slyšet.', 
-  'TEXT', 
-  2400, 
-  2, 
-  40
+  'Chladný Restart', 
+  '2 minuty studené sprchy nebo 50 kliků/dřepů rozložených v dni.', 
+  'Prudce zvýšíš hladinu dopaminu a prověříš svou vůli.', 
+  'PHOTO', 
+  1800, 
+  3, 
+  100
 ),
 (
   'c-node-6', 
   'n-node-6', 
-  'Připojení k příteli', 
-  'Pošli upřímnou zprávu starému příteli a popiš jeho odpověď.', 
-  'Obnovíš staré pouto a přineseš radost někomu dalšímu.', 
-  'TEXT', 
-  3600, 
-  2, 
-  45
+  'Analogový Otisk', 
+  'Napiš ručně na papír 3 své osobní zásady nebo nakresli skicu.', 
+  'Zanecháš hmatatelný otisk v reálném světě.', 
+  'PHOTO', 
+  2400, 
+  4, 
+  125
 ),
 (
   'c-node-7', 
   'n-node-7', 
-  'Svědek úsvitu', 
-  'Vzbuď se s východem slunce a udělej pár kroků na vzduchu. Popiš pocit.', 
-  'Zažiješ klid a novou energii na začátku dne.', 
-  'TEXT', 
+  'Anonymní Gesto', 
+  'Kup kávu někomu neznámému nebo nech milý vzkaz na veřejném místě.', 
+  'Štědrost bez očekávání ti dává obrovskou osobní sílu.', 
+  'PHOTO', 
+  3600, 
+  4, 
+  150
+),
+(
+  'c-node-8', 
+  'n-node-8', 
+  'Offline Procházka', 
+  'Jdi na 30 minut ven bez sluchátek. Vyfoť unikátní detail města či přírody.', 
+  'Naučíš se vnímat krásu přítomného okamžiku.', 
+  'PHOTO', 
   1800, 
-  2, 
-  50
+  5, 
+  200
+),
+(
+  'c-boss-challenge', 
+  'n-node-9', 
+  'Prolomení Sítě ZAYA (Boss Fight)', 
+  'Celodenní výzva: 24h bez sociálních sítí + 10 000 kroků + 1 dobrý skutek.', 
+  'Stáváš se oficiálně potvrzeným Doerem Season 0.', 
+  'PHOTO', 
+  86400, 
+  10, 
+  500
 ) ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description, why_text = EXCLUDED.why_text, proof_type = EXCLUDED.proof_type, reward_keys = EXCLUDED.reward_keys, reward_xp = EXCLUDED.reward_xp;
 
--- 4. Insert Steps for the NPC Challenge (Node 3)
+-- 4. Insert Steps for Challenges
 INSERT INTO public.challenge_steps (id, challenge_id, step_order, text)
 VALUES 
+('cs-1-1', 'c-node-1', 1, 'Sedni si nebo se postav na klidné místo.'),
+('cs-1-2', 'c-node-1', 2, 'Spusť 3minutový časovač.'),
+('cs-1-3', 'c-node-1', 3, 'Pouze pozoruj lidi a věci kolem.'),
+('cs-1-4', 'c-node-1', 4, 'Napiš krátkou myšlenku nebo pocit.'),
+
 ('cs-3-1', 'c-npc-challenge', 1, 'Vyjdi ven z domu nebo kanceláře.'),
 ('cs-3-2', 'c-npc-challenge', 2, 'Najdi v okruhu 100 metrů 3 odhozené odpadky.'),
 ('cs-3-3', 'c-npc-challenge', 3, 'Odnes je k nejbližšímu popelnici či koši.'),
-('cs-3-4', 'c-npc-challenge', 4, 'Vyfoť je těsně před vyhozením jako důkaz.')
+('cs-3-4', 'c-npc-challenge', 4, 'Vyfoť je těsně před vyhozením jako důkaz.'),
+
+('cs-9-1', 'c-boss-challenge', 1, 'Zapni mód nerušit na telefonu na 24 hodin.'),
+('cs-9-2', 'c-boss-challenge', 2, 'Ujdi v reálném světě minimálně 10 000 kroků.'),
+('cs-9-3', 'c-boss-challenge', 3, 'Udělej 1 nesobecký dobrý skutek v okolí.'),
+('cs-9-4', 'c-boss-challenge', 4, 'Vyfoť finální okamžik tvé výzvy.')
 ON CONFLICT (id) DO UPDATE SET text = EXCLUDED.text;
