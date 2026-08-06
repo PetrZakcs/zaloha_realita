@@ -12,16 +12,9 @@ import Profile from './components/Profile';
 import AdminContentManager from './components/admin/AdminContentManager';
 import './styles/index.css';
 
-const ADMIN_EMAILS = [
-  'admin@iwau.cz',
-  'klient@iwau.cz',
-  'test@iwau.cz',
-  'petr@iwau.cz'
-];
-
 const AdminRoute = () => {
   const { user } = useUserStore();
-  const isAllowed = user?.isAdmin || (user?.email && ADMIN_EMAILS.includes(user.email.toLowerCase()));
+  const isAllowed = Boolean(user?.isAdmin);
 
   if (!isAllowed) {
     return (
@@ -62,6 +55,17 @@ const AdminRoute = () => {
 
 function App() {
   useEffect(() => {
+    // Check initial active session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        localStorage.setItem('userId', session.user.id);
+        useUserStore.getState().handleOAuthSession(session);
+      } else {
+        useUserStore.getState().fetchFeedPosts();
+        useUserStore.getState().fetchLeaderboard();
+      }
+    });
+
     // Auth listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session) {

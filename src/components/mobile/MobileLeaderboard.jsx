@@ -1,8 +1,14 @@
+import { useEffect } from 'react';
 import { useUserStore } from '../../store/userStore';
 import { Crown, TrendingUp } from 'lucide-react';
 
 export default function MobileLeaderboard() {
-  const { user, leaderboard } = useUserStore();
+  const { user, leaderboard, fetchLeaderboard } = useUserStore();
+
+  useEffect(() => {
+    fetchLeaderboard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div style={{

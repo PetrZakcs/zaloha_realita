@@ -1,5 +1,6 @@
 import { useUserStore } from '../../store/userStore';
 import { Settings as SettingsIcon, Shield, Flame, Leaf, Zap, Lock, Sparkles, ChevronRight } from 'lucide-react';
+import HraPassCard from '../common/HraPassCard';
 
 export default function MobileProfile() {
   const { user, openModal } = useUserStore();
@@ -120,6 +121,11 @@ export default function MobileProfile() {
             <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', color: '#22C55E' }}>12</div>
             <div style={{ fontFamily: 'Inter', fontSize: '9px', color: '#6B6B8A', marginTop: '2px' }}>zásahy</div>
           </div>
+        </div>
+
+        {/* HRA PASS Banner */}
+        <div style={{ padding: '16px 24px 0' }}>
+          <HraPassCard compact />
         </div>
 
         {/* Badges Grid */}

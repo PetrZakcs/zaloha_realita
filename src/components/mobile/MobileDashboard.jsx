@@ -2,6 +2,7 @@ import { Fragment, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { Flame, KeyRound, ArrowRight, Play, Lock, Crown, Check } from 'lucide-react';
+import HraPassCard from '../common/HraPassCard';
 
 export default function MobileDashboard() {
   const { user, activeChallenge, allStoryNodes, loadAllStoryNodes } = useUserStore();
@@ -53,12 +54,15 @@ export default function MobileDashboard() {
         </div>
       </div>
 
+      {/* HRA PASS PROMO CARD */}
+      <HraPassCard />
+
       {/* QUEST PATH */}
       {allStoryNodes.length > 0 && (
         <div style={{ flexShrink: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '9px' }}>
             <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#6B6B8A' }}>Sezóna 0 · cesta</span>
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', color: '#A78BFA' }}>Uzel {user?.uzel || 0} / {allStoryNodes.length - 1}</span>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', color: '#A78BFA' }}>Uzel {user?.uzel || 0} / {allStoryNodes.length}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             {allStoryNodes.map((node, idx) => {

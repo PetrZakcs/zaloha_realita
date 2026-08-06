@@ -12,12 +12,10 @@ import {
   Bell,
   Settings,
   Crown,
-  Signal,
-  Wifi,
-  BatteryMedium,
   Sparkles
 } from 'lucide-react';
 import ModalManager from './ModalManager';
+import PwaInstallBanner from './layout/PwaInstallBanner';
 
 export default function Layout() {
   const navigate = useNavigate();
@@ -113,8 +111,9 @@ export default function Layout() {
     return (
       <div style={{
         position: 'relative',
-        width: '100vw',
-        height: '100vh',
+        width: '100%',
+        height: '100dvh',
+        maxHeight: '100dvh',
         background: '#15111E',
         backgroundImage: 'radial-gradient(circle at 15% 0%, rgba(124, 58, 237, 0.16), transparent 45%)',
         color: '#F0F0F8',
@@ -123,23 +122,6 @@ export default function Layout() {
         display: 'flex',
         flexDirection: 'column'
       }}>
-
-          {/* Slim Status Bar */}
-          <div style={{
-            height: '46px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '0 26px',
-            flexShrink: 0
-          }}>
-            <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '14px' }}>9:41</span>
-            <div style={{ display: 'flex', gap: '7px', color: '#F0F0F8' }}>
-              <span style={{ display: 'inline-flex', width: '17px', height: '17px' }}><Signal size={14} /></span>
-              <span style={{ display: 'inline-flex', width: '17px', height: '17px' }}><Wifi size={14} /></span>
-              <span style={{ display: 'inline-flex', width: '19px', height: '17px' }}><BatteryMedium size={16} /></span>
-            </div>
-          </div>
 
           {/* App Top Bar */}
           <div style={{
@@ -210,64 +192,94 @@ export default function Layout() {
           </div>
 
           {/* Main Content Area */}
-          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', paddingBottom: '90px' }}>
+            <PwaInstallBanner />
             <Outlet />
           </div>
 
-          {/* Bottom Nav Capsule */}
+          {/* Bottom Nav Capsule (Centered Dock) */}
           <div style={{
+            position: 'fixed',
+            bottom: 0,
+            left: 0,
+            width: '100%',
+            zIndex: 99,
             display: 'flex',
-            justifyContent: 'space-around',
-            alignItems: 'center',
-            margin: '0 14px 16px',
-            padding: '10px 8px',
-            border: '1px solid #2A2142',
-            borderRadius: '26px',
-            background: 'rgba(32,24,50,.94)',
-            boxShadow: '0 12px 34px rgba(0,0,0,.5)',
-            backdropFilter: 'blur(8px)',
-            flexShrink: 0
+            justify: 'center',
+            padding: '0 12px calc(10px + env(safe-area-inset-bottom, 0px))',
+            pointerEvents: 'none',
+            boxSizing: 'border-box'
           }}>
-            {nav.map((item) => {
-              const { icon, label, path, action } = item;
-              const active = isNavItemActive(item);
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => action ? action() : navigate(path)}
-                  style={{
-                    background: active ? 'radial-gradient(circle, rgba(124,58,237,.38), rgba(124,58,237,.08) 72%)' : 'transparent',
-                    boxShadow: active ? '0 0 16px rgba(124,58,237,.4)' : 'none',
-                    border: 'none',
-                    borderRadius: active ? '16px' : '0',
-                    color: active ? '#fff' : '#54506A',
-                    padding: active ? '8px 15px 7px' : '8px 0 7px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: '4px',
-                    transition: 'all .2s'
-                  }}
-                >
-                  <span style={{ 
-                    display: 'inline-flex', 
-                    width: '22px', 
-                    height: '22px',
-                    filter: active ? 'drop-shadow(0 0 5px rgba(167,139,250,.9))' : 'none'
-                  }}>
-                    {icon}
-                  </span>
-                  <span style={{
-                    fontFamily: 'Inter',
-                    fontWeight: active ? '700' : '500',
-                    fontSize: '9px'
-                  }}>
-                    {label}
-                  </span>
-                </button>
-              );
-            })}
+            <div style={{
+              width: '100%',
+              maxWidth: '430px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '6px 4px',
+              border: '1px solid rgba(124, 58, 237, 0.3)',
+              borderRadius: '26px',
+              background: 'rgba(21, 17, 30, 0.94)',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.6), 0 0 15px rgba(124, 58, 237, 0.15)',
+              backdropFilter: 'blur(16px)',
+              WebkitBackdropFilter: 'blur(16px)',
+              pointerEvents: 'auto',
+              boxSizing: 'border-box'
+            }}>
+              {nav.map((item) => {
+                const { icon, label, path, action } = item;
+                const active = isNavItemActive(item);
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => action ? action() : navigate(path)}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      background: 'transparent',
+                      border: 'none',
+                      padding: '6px 0 4px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '3px',
+                      transition: 'all 0.2s ease',
+                      WebkitTapHighlightColor: 'transparent'
+                    }}
+                  >
+                    <span style={{ 
+                      display: 'inline-flex', 
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '40px', 
+                      height: '26px',
+                      borderRadius: '13px',
+                      background: active ? 'radial-gradient(circle, rgba(124,58,237,0.55), rgba(124,58,237,0.18))' : 'transparent',
+                      boxShadow: active ? '0 0 12px rgba(124,58,237,0.5)' : 'none',
+                      color: active ? '#A78BFA' : '#6B6B8A',
+                      transition: 'all 0.2s ease'
+                    }}>
+                      {icon}
+                    </span>
+                    <span style={{
+                      fontFamily: 'Inter, sans-serif',
+                      fontWeight: active ? '700' : '500',
+                      fontSize: '10px',
+                      color: active ? '#FFFFFF' : '#6B6B8A',
+                      letterSpacing: '-0.01em',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      maxWidth: '100%'
+                    }}>
+                      {label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Modal Overlay Controller */}

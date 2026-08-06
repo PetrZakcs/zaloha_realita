@@ -12,7 +12,7 @@ export default function DesktopDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const maxNode = allStoryNodes.length > 1 ? allStoryNodes.length - 1 : 9;
+  const maxNode = allStoryNodes.length > 0 ? allStoryNodes.length : 9;
   const progressPct = Math.min(100, Math.round(((user?.uzel || 0) / maxNode) * 100));
 
   return (
@@ -74,7 +74,7 @@ export default function DesktopDashboard() {
             Sezóna 0 · cesta
           </span>
           <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: '#A78BFA' }}>
-            Uzel {user?.uzel || 0} / {allStoryNodes.length - 1}
+            Uzel {user?.uzel || 0} / {allStoryNodes.length}
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center' }}>

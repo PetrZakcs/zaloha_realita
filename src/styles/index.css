@@ -46,6 +46,38 @@ html, body {
   80% { opacity: 1; transform: translate(1px, 1px); }
 }
 
+/* Post-Quest Celebration Animations */
+@keyframes badgePopIn {
+  0% { transform: scale(0.3) rotate(-10deg); opacity: 0; }
+  60% { transform: scale(1.15) rotate(5deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); }
+}
+
+@keyframes xpFloatBurst {
+  0% { transform: translateY(0) scale(0.8); opacity: 0; }
+  50% { transform: translateY(-25px) scale(1.2); opacity: 1; }
+  100% { transform: translateY(-50px) scale(1); opacity: 0; }
+}
+
+@keyframes cardShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-badge-pop {
+  animation: badgePopIn 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+.animate-xp-burst {
+  animation: xpFloatBurst 1.2s ease-out forwards;
+}
+
+.animate-card-shimmer {
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.15) 50%, rgba(255,255,255,0) 100%);
+  background-size: 200% 100%;
+  animation: cardShimmer 2.5s infinite;
+}
+
 .dot-blink {
   display: inline-flex;
   align-items: center;

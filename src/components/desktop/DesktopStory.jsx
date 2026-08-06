@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useUserStore } from '../../store/userStore';
 import { LockOpen, Play, Lock, ArrowRight, Check, Terminal, Skull } from 'lucide-react';
+import TypewriterText from '../common/TypewriterText';
 
 export default function DesktopStory() {
   const { 
@@ -64,7 +65,7 @@ export default function DesktopStory() {
                     ZAYA_SYS
                   </div>
                   <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13.5px', color: '#F0F0F8', lineHeight: '1.6' }}>
-                    {msg.text}
+                    {i === storyDialogStep ? <TypewriterText text={msg.text} speed={10} /> : msg.text}
                   </div>
                   {msg.sys && (
                     <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: '#3B82F6', opacity: '.55', marginTop: '9px' }}>
@@ -221,7 +222,7 @@ export default function DesktopStory() {
                   incrementDialogStep();
                   setTimeout(() => {
                     incrementDialogStep();
-                  }, 1500);
+                  }, 350);
                 }
               }}
               style={{

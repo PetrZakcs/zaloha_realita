@@ -1,11 +1,16 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useUserStore } from '../../store/userStore';
 import { track } from '../../lib/analytics';
 import { SlidersHorizontal, Shield, Flame, CheckCircle2, Eye, Share2, ImageIcon, ChevronRight } from 'lucide-react';
 
 export default function MobileFeed() {
-  const { feed, addReaction, openModal } = useUserStore();
+  const { feed, addReaction, openModal, fetchFeedPosts } = useUserStore();
   const [filter, setFilter] = useState('all');
+
+  useEffect(() => {
+    fetchFeedPosts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filteredFeed = feed.filter(post => {
     if (filter === 'doers') return post.rarity !== 'Common';

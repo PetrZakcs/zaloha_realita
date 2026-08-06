@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useUserStore } from '../../store/userStore';
 import { ChevronLeft, LockOpen, ArrowRight } from 'lucide-react';
+import TypewriterText from '../common/TypewriterText';
 
 export default function MobileStory() {
   const { 
@@ -95,7 +96,7 @@ export default function MobileStory() {
                   ZAYA_SYS
                 </div>
                 <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', color: '#F0F0F8', lineHeight: '1.55' }}>
-                  {msg.text}
+                  {i === storyDialogStep ? <TypewriterText text={msg.text} speed={10} /> : msg.text}
                 </div>
                 {msg.sys && (
                   <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: '#3B82F6', opacity: '.55', marginTop: '9px' }}>
@@ -246,10 +247,10 @@ export default function MobileStory() {
               if (storyDialogStep % 2 === 0) {
                 // Player speaks
                 incrementDialogStep();
-                // Auto-advance after 1.5s typing delay
+                // Auto-advance fast after 350ms
                 setTimeout(() => {
                   incrementDialogStep();
-                }, 1500);
+                }, 350);
               }
             }}
             style={{
