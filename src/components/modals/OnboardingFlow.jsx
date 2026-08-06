@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useUserStore } from '../../store/userStore';
-import { Mail, Globe, Sparkles } from 'lucide-react';
+import { MessageSquare, Globe, Sparkles } from 'lucide-react';
 
 export default function OnboardingFlow() {
   const {
@@ -172,8 +172,8 @@ export default function OnboardingFlow() {
             <Globe size={18} color="#4285F4" /> Pokračovat přes Google
           </button>
           
-          <button 
-            onClick={() => login('email')}
+          <button
+            onClick={() => login('discord')}
             style={{
               width: '100%',
               height: '48px',
@@ -190,7 +190,7 @@ export default function OnboardingFlow() {
               cursor: 'pointer'
             }}
           >
-            <Mail size={18} color="#A78BFA" /> Pokračovat e-mailem
+            <MessageSquare size={18} color="#5865F2" /> Pokračovat přes Discord
           </button>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '8px 0' }}>
