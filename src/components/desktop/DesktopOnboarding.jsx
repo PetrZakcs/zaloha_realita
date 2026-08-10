@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useUserStore } from '../../store/userStore';
 import { DEFAULT_USER, DESKTOP_ONBOARDING_STEPS } from '../../store/slices/authSlice';
-import { MessageSquare, Globe, Sparkles, MonitorDown, Check, Bot, Shield, Crown } from 'lucide-react';
+import { Sparkles, MonitorDown, Check, Bot, Shield, Crown } from 'lucide-react';
 import EmailAuthForm from '../onboarding/EmailAuthForm';
+import { GoogleIcon, DiscordIcon } from '../onboarding/AuthIcons';
 import { usePwaInstall } from '../../hooks/usePwaInstall';
 import { setRememberMe } from '../../api/supabaseClient';
 
@@ -206,10 +207,10 @@ export default function DesktopOnboarding() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '24px' }}>
           <button onClick={() => handleOAuthClick('google')} disabled={pendingProvider === 'google'} style={oauthButtonStyle(pendingProvider === 'google')}>
-            <Globe size={18} color="#4285F4" /> {pendingProvider === 'google' ? 'Připojuji…' : 'Pokračovat přes Google'}
+            <GoogleIcon size={18} /> {pendingProvider === 'google' ? 'Připojuji…' : 'Pokračovat přes Google'}
           </button>
           <button onClick={() => handleOAuthClick('discord')} disabled={pendingProvider === 'discord'} style={oauthButtonStyle(pendingProvider === 'discord')}>
-            <MessageSquare size={18} color="#5865F2" /> {pendingProvider === 'discord' ? 'Připojuji…' : 'Pokračovat přes Discord'}
+            <DiscordIcon size={18} /> {pendingProvider === 'discord' ? 'Připojuji…' : 'Pokračovat přes Discord'}
           </button>
         </div>
 

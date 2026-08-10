@@ -59,6 +59,9 @@ export const createAuthSlice = (set, get) => {
     user: localUser || (localOnboarded ? DEFAULT_USER : null),
     loading: false,
     unlockedCards: [],
+    // Internal bookkeeping only (not meant to be read by components) — see
+    // handleOAuthSession's race guard below.
+    _handlingOAuthSessionId: null,
 
     setOnboardingStep: (step) => {
       set({ onboardingStep: step });
@@ -357,6 +360,21 @@ export const createAuthSlice = (set, get) => {
 
     handleOAuthSession: async (session) => {
       if (!session?.user) return;
+
+      // App.jsx's initial supabase.auth.getSession() and its
+      // onAuthStateChange listener both fire on a fresh OAuth/email-confirm
+      // redirect, delivering the same session to this function twice,
+      // concurrently. Without this guard, both calls race the "does a
+      // profile exist yet" check, both see "no", and both try to insert —
+      // one wins, one hits a duplicate-key error and bails out silently
+      // (caught below), leaving the user stranded on whatever step they
+      // started on ("dostanu se na formulář, po odsouhlasení mě to hodí
+      // zpátky na hlavní stránku" — Discord auth genuinely succeeded, this
+      // insert race is what actually failed). The guard makes the second,
+      // redundant call a no-op instead of a race.
+      if (get()._handlingOAuthSessionId === session.user.id) return;
+      set({ _handlingOAuthSessionId: session.user.id });
+
       try {
         const { data: existingProfile } = await supabase
           .from('profiles')
@@ -413,6 +431,8 @@ export const createAuthSlice = (set, get) => {
         }
       } catch (e) {
         console.warn('Failed to resolve OAuth session profile.', e);
+      } finally {
+        set({ _handlingOAuthSessionId: null });
       }
     }
   };
