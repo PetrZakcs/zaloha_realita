@@ -249,94 +249,81 @@ export const createGameplaySlice = (set, get) => ({
     const u = get().user;
     const c = get().activeChallenge;
     if (u) {
-      const xpReward = c ? c.reward_xp : 50;
-      const keysReward = proofData.is_public ? (c ? c.reward_keys + 1 : 3) : (c ? c.reward_keys : 2);
-      const newXp = u.xp + xpReward;
-      const newKeys = u.keys_count + keysReward;
-      const badgeUnlocked = u.badges_count < 5;
-      const newBadgesCount = badgeUnlocked ? u.badges_count + 1 : u.badges_count;
-
-      const updatedUser = {
-        ...u,
-        xp: newXp,
-        keys_count: newKeys,
-        badges_count: newBadgesCount
-      };
-
-      set({ user: updatedUser });
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          await supabase.from('feed_posts').insert([{
-            user_id: session.user.id,
-            user_name: u.name,
-            content: proofData.text || 'Prokázal jsem, že nejsem NPC! 🟢',
-            image_url: imageUrl,
-            is_public: proofData.is_public
-          }]);
+        if (!session) throw new Error('No active Supabase session');
 
-          await supabase.from('profiles').update({
-            xp: newXp,
-            keys_balance: newKeys,
-            avatar_level: newBadgesCount
-          }).eq('id', session.user.id);
+        // All reward-granting logic (server-validated amounts, atomic completion
+        // check + grant, feed_posts/key_transactions/user_cards writes) now lives
+        // in the complete_challenge() RPC — the client no longer computes or
+        // writes reward amounts directly. See supabase_migration_profiles_security.sql.
+        const { data, error } = await supabase.rpc('complete_challenge', {
+          p_challenge_id: c ? c.id : 'c-npc-challenge',
+          p_proof_text: proofData.text || null,
+          p_image_url: imageUrl,
+          p_is_public: !!proofData.is_public
+        });
+        if (error) throw error;
 
-          await supabase.from('key_transactions').insert([{
-            user_id: session.user.id,
-            amount: keysReward,
-            source: proofData.is_public ? 'PROOF_PUBLIC' : 'CHALLENGE_COMPLETE',
-            balance_after: newKeys
-          }]);
+        const result = Array.isArray(data) ? data[0] : data;
+        const updatedUser = {
+          ...u,
+          xp: result.new_xp,
+          keys_count: result.new_keys_balance,
+          badges_count: result.new_avatar_level
+        };
+        set({ user: updatedUser });
+        localStorage.setItem('user', JSON.stringify(updatedUser));
 
-          await supabase.from('challenge_completions').insert([{
-            user_id: session.user.id,
-            challenge_id: c ? c.id : 'c-npc-challenge',
-            completed_at: new Date().toISOString()
-          }]);
+        get().loadUnlockedCards();
+        // complete_challenge() already inserted the real feed_posts row server-side —
+        // refetch from Supabase instead of optimistically faking a local entry.
+        get().fetchFeedPosts();
 
-          const cardKeyToUnlock = c ? `${c.id}-card` : 'doer-mvp1';
-          await supabase.from('user_cards').insert([{
-            user_id: session.user.id,
-            card_key: cardKeyToUnlock,
-            sync_status: 'SYNCED',
-            obtained_at: new Date().toISOString()
-          }]);
-
-          get().loadUnlockedCards();
-
-          if (u.discord_user_id) {
-            await fetch(`${process.env.REACT_APP_SUPABASE_URL}/functions/v1/airtable-sync`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${process.env.REACT_APP_SUPABASE_ANON_KEY}`
-              },
-              body: JSON.stringify({
-                discordUserId: u.discord_user_id,
-                cardKey: 'doer-mvp1'
-              })
-            });
-          }
+        if (u.discord_user_id) {
+          await fetch(`${process.env.REACT_APP_SUPABASE_URL}/functions/v1/airtable-sync`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${process.env.REACT_APP_SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify({
+              discordUserId: u.discord_user_id,
+              cardKey: 'doer-mvp1'
+            })
+          });
         }
       } catch (e) {
-        console.warn('Supabase update failed during proof upload, fallback to local perzistence.', e);
-      }
+        // Preserves the app's existing offline/demo-mode resilience: if the RPC
+        // fails (no session, network down, or a locally-faked activeChallenge.id
+        // like "npc-challenge"/"c-node-N" that doesn't exist server-side), fall
+        // back to a LOCAL-ONLY reward. This is not persisted server-side.
+        console.warn('complete_challenge RPC failed, using local-only reward (not persisted).', e);
+        const xpReward = c ? c.reward_xp : 50;
+        const keysReward = proofData.is_public ? (c ? c.reward_keys + 1 : 3) : (c ? c.reward_keys : 2);
+        const updatedUser = {
+          ...u,
+          xp: u.xp + xpReward,
+          keys_count: u.keys_count + keysReward,
+          badges_count: u.badges_count < 5 ? u.badges_count + 1 : u.badges_count
+        };
+        set({ user: updatedUser });
+        localStorage.setItem('user', JSON.stringify(updatedUser));
 
-      const newFeedItem = {
-        id: 'new_' + Date.now(),
-        user_name: u.name,
-        rarity: u.rarity,
-        content: proofData.text || 'Prokázal jsem, že nejsem NPC! 🟢',
-        image_url: imageUrl,
-        reactions_fire: 0,
-        reactions_lightning: 0,
-        reactions_eye: 0,
-        created_at: new Date().toISOString(),
-        is_public: proofData.is_public
-      };
-      set(state => ({ feed: [newFeedItem, ...state.feed] }));
+        const newFeedItem = {
+          id: 'new_' + Date.now(),
+          user_name: u.name,
+          rarity: u.rarity,
+          content: proofData.text || 'Prokázal jsem, že nejsem NPC! 🟢',
+          image_url: imageUrl,
+          reactions_fire: 0,
+          reactions_lightning: 0,
+          reactions_eye: 0,
+          created_at: new Date().toISOString(),
+          is_public: proofData.is_public
+        };
+        set(state => ({ feed: [newFeedItem, ...state.feed] }));
+      }
     }
 
     const proofsSubmitted = get().proofsSubmittedCount + 1;
@@ -357,43 +344,62 @@ export const createGameplaySlice = (set, get) => ({
     const u = get().user;
     if (!u) return;
 
-    const allNodes = get().allStoryNodes;
-    const currentNode = allNodes.find(n => n.node_order === u.uzel);
-    const nextNode = allNodes.find(n => n.node_order === u.uzel + 1);
-
-    // Only REFERENTIAL nodes are narrative-only dead ends with no challenge to play.
-    // FINAL (the Season 0 boss) has a real challenge and must stay reachable.
-    if (nextNode && nextNode.type === 'REFERENTIAL') {
-      track('season_completed', { node: u.uzel });
-      set({ activeModal: null });
-      return;
-    }
-
-    // Completed the last node (currently the FINAL boss) with nothing further defined yet —
-    // Season 2 content isn't designed (see HANDOFF.md 8.6). Stop here instead of silently
-    // reloading the same boss challenge, which would let a player resubmit it for infinite
-    // XP/keys.
-    if (!nextNode && currentNode?.type === 'FINAL') {
-      track('season_completed', { node: u.uzel });
-      set({ activeModal: null });
-      return;
-    }
-
-    const updatedNode = nextNode ? nextNode.node_order : Math.min(u.uzel + 1, 9);
-    const updated = { ...u, uzel: updatedNode };
-    set({ user: updated, activeModal: null });
-    localStorage.setItem('user', JSON.stringify(updated));
-
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        await supabase.from('profiles').update({ uzel: updatedNode }).eq('id', session.user.id);
+      if (!session) throw new Error('No active Supabase session');
+
+      // Server-validated: resolves current/next node, checks REFERENTIAL/FINAL season-end
+      // conditions, and enforces requires_pass against the caller's own pass_holder — all
+      // previously done (or, for the pass check, never done at all) on the client against
+      // data it could freely fake. See supabase_migration_advance_node.sql.
+      const { data, error } = await supabase.rpc('advance_node');
+      if (error) throw error;
+
+      const result = Array.isArray(data) ? data[0] : data;
+
+      if (result.status === 'season_completed') {
+        track('season_completed', { node: u.uzel });
+        set({ activeModal: null });
+        return;
       }
+
+      if (result.status === 'pass_required') {
+        track('node_gated_by_pass', { node: u.uzel });
+        set({ activeModal: 'paywall' });
+        return;
+      }
+
+      const updated = { ...u, uzel: result.new_uzel };
+      set({ user: updated, activeModal: null });
+      localStorage.setItem('user', JSON.stringify(updated));
+      track('node_completed', { node: result.new_uzel });
+      get().loadCurrentNodeData();
     } catch (e) {
-      console.warn('Failed syncing node advancement to database.', e);
+      // Same offline/demo-mode resilience as elsewhere: fall back to a local-only advance,
+      // not persisted server-side, using whatever node list the client already loaded.
+      console.warn('advance_node RPC failed, using local-only progression (not persisted).', e);
+      const allNodes = get().allStoryNodes;
+      const currentNode = allNodes.find(n => n.node_order === u.uzel);
+      const nextNode = allNodes.find(n => n.node_order === u.uzel + 1);
+
+      if (nextNode && nextNode.type === 'REFERENTIAL') {
+        track('season_completed', { node: u.uzel });
+        set({ activeModal: null });
+        return;
+      }
+      if (!nextNode && currentNode?.type === 'FINAL') {
+        track('season_completed', { node: u.uzel });
+        set({ activeModal: null });
+        return;
+      }
+
+      const updatedNode = nextNode ? nextNode.node_order : Math.min(u.uzel + 1, 9);
+      const updated = { ...u, uzel: updatedNode };
+      set({ user: updated, activeModal: null });
+      localStorage.setItem('user', JSON.stringify(updated));
+      track('node_completed', { node: updatedNode });
+      get().loadCurrentNodeData();
     }
-    track('node_completed', { node: updatedNode });
-    get().loadCurrentNodeData();
   },
 
   toggleNotificationRead: (id) => {

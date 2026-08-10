@@ -1,6 +1,27 @@
 import { supabase } from '../../api/supabaseClient';
 import { track } from '../../lib/analytics';
 
+// Ordered onboarding step sequences per platform. Desktop gets an extra
+// 'install' (PWA) step at the end, right before completeOnboarding() flips
+// `onboarded`; mobile keeps its existing separate post-onboarding install
+// banner instead (see PwaInstallBanner.jsx) and never uses 'install'.
+export const MOBILE_ONBOARDING_STEPS = ['splash', 'intro', 'login', 'nickname', 'slib', 'reward'];
+export const DESKTOP_ONBOARDING_STEPS = ['intro', 'login', 'nickname', 'slib', 'reward', 'install'];
+
+// Translates the handful of Supabase auth errors we actually expect to hit
+// into Czech, matching this app's all-Czech-copy convention. Anything
+// unrecognized falls back to a generic message rather than leaking raw
+// English Supabase error text into the UI.
+function mapSupabaseAuthError(error) {
+  const msg = error?.message || '';
+  if (/invalid login credentials/i.test(msg)) return 'Nesprávný e-mail nebo heslo.';
+  if (/user already registered/i.test(msg)) return 'Účet s tímto e-mailem už existuje. Zkus se přihlásit.';
+  if (/password should be at least/i.test(msg)) return 'Heslo je příliš krátké.';
+  if (/email not confirmed/i.test(msg)) return 'E-mail ještě není potvrzený. Zkontroluj schránku.';
+  if (/rate limit/i.test(msg)) return 'Příliš mnoho pokusů. Zkus to prosím za chvíli.';
+  return 'Něco se nepovedlo. Zkus to prosím znovu.';
+}
+
 export const DEFAULT_USER = {
   name: 'NovýHráč',
   xp: 0,
@@ -39,13 +60,14 @@ export const createAuthSlice = (set, get) => {
       localStorage.setItem('onboardingStep', step);
     },
 
-    nextOnboardingStep: () => {
-      const step = get().onboardingStep;
-      if (step === 'splash') get().setOnboardingStep('intro');
-      else if (step === 'intro') get().setOnboardingStep('login');
-      else if (step === 'login') get().setOnboardingStep('nickname');
-      else if (step === 'nickname') get().setOnboardingStep('slib');
-      else if (step === 'slib') get().setOnboardingStep('reward');
+    nextOnboardingStep: (isMobile) => {
+      const steps = isMobile ? MOBILE_ONBOARDING_STEPS : DESKTOP_ONBOARDING_STEPS;
+      const idx = steps.indexOf(get().onboardingStep);
+      // Unrecognized/legacy/wrong-platform step value (e.g. 'splash' persisted
+      // from a mobile session, now being read on desktop) -> land on this
+      // platform's first step instead of the old silent no-op dead end.
+      const next = idx === -1 ? steps[0] : steps[Math.min(idx + 1, steps.length - 1)];
+      get().setOnboardingStep(next);
     },
 
     loadUnlockedCards: async () => {
@@ -76,14 +98,16 @@ export const createAuthSlice = (set, get) => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
+          // xp / keys_balance / avatar_level are only ever changed via the
+          // complete_challenge() RPC; pass_holder is only ever set by the
+          // stripe-webhook edge function (service_role). The DB trigger from
+          // supabase_migration_profiles_security.sql also rejects those columns
+          // from this client path now, so writing them here would silently
+          // no-op anyway — removed proactively instead of left to fail.
           await supabase.from('profiles').update({
             display_name: updated.name,
             pledge: updated.pledge,
-            discord_user_id: updated.discord_user_id,
-            xp: updated.xp,
-            keys_balance: updated.keys_count,
-            pass_holder: updated.passHolder,
-            avatar_level: updated.badges_count
+            discord_user_id: updated.discord_user_id
           }).eq('id', session.user.id);
         }
       } catch (e) {
@@ -108,18 +132,100 @@ export const createAuthSlice = (set, get) => {
       track('login', { method });
 
       try {
-        if (method === 'google' || method === 'discord') {
-          await supabase.auth.signInWithOAuth({ 
-            provider: method,
-            options: {
-              redirectTo: window.location.origin
-            }
-          });
-        } else {
-          await supabase.auth.signInAnonymously();
-        }
+        await supabase.auth.signInWithOAuth({
+          provider: method,
+          options: {
+            redirectTo: window.location.origin
+          }
+        });
+        // OAuth navigates the browser away to the provider's consent screen —
+        // "success" here just means the redirect started, not that auth
+        // completed. Nothing meaningful to return; the caller's loading UI
+        // is moot past this point since the page is about to unload.
+        return { success: true };
       } catch (e) {
         console.warn('Supabase auth signin omitted, using local session.', e);
+        return { success: false };
+      }
+    },
+
+    // Brand-new account via email/password. No page navigation happens (unlike
+    // OAuth), so — same as login() above — we'd normally drive the local
+    // onboarding step machine ourselves. But this Supabase project has
+    // mailer_autoconfirm off, so signUp() usually comes back with no session
+    // yet — the account only becomes real once the user clicks the
+    // confirmation link. If we jumped to 'nickname' immediately regardless,
+    // the login screen (and EmailAuthForm's "zkontroluj e-mail" interstitial)
+    // would get unmounted right away, and the user would appear to be
+    // onboarded without ever having a real session. So: only advance the step
+    // when a session actually lands now. The optimistic user object is still
+    // persisted to localStorage either way, so if the confirmation link is
+    // opened in a fresh tab, that tab rehydrates it and
+    // handleOAuthSession()'s new-profile branch picks up the right
+    // name/bonus key instead of falling back to defaults.
+    registerWithEmail: async (email, password) => {
+      const randomName = 'Hráč_' + Math.floor(Math.random() * 1000);
+      const newUser = {
+        ...DEFAULT_USER,
+        name: randomName,
+        keys_count: DEFAULT_USER.keys_count + 1,
+        xp: 0,
+        uzel: 1,
+        badges_count: 1,
+        email
+      };
+
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: window.location.origin }
+        });
+        if (error) {
+          return { success: false, error: mapSupabaseAuthError(error) };
+        }
+
+        localStorage.setItem('user', JSON.stringify(newUser));
+
+        const needsConfirmation = !data.session;
+        if (!needsConfirmation) {
+          set({ user: newUser, onboardingStep: 'nickname' });
+          localStorage.setItem('onboardingStep', 'nickname');
+          get().loadCurrentNodeData();
+        } else {
+          // Keep the in-memory user optimistic too (just not the onboarding
+          // step) so the current tab's UI — name previews, etc. — has
+          // something sensible while it waits.
+          set({ user: newUser });
+        }
+        track('login', { method: 'email_register' });
+
+        return { success: true, needsConfirmation };
+      } catch (e) {
+        console.warn('registerWithEmail failed.', e);
+        return { success: false, error: 'Registraci se nepodařilo dokončit. Zkus to prosím znovu.' };
+      }
+    },
+
+    // Existing account via email/password. Deliberately does NOT touch
+    // onboardingStep (unlike login()/registerWithEmail above) — this is the
+    // one action where forcing a step would be wrong: signInWithPassword also
+    // doesn't navigate away, so a naive forced 'nickname' would flash that
+    // screen at a returning user for a moment before the async
+    // onAuthStateChange -> handleOAuthSession -> fetchUser chain resolves and
+    // correctly flips `onboarded:true`. Just await the sign-in and let that
+    // existing chain do its job.
+    loginWithEmail: async (email, password) => {
+      try {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) {
+          return { success: false, error: mapSupabaseAuthError(error) };
+        }
+        track('login', { method: 'email_signin' });
+        return { success: true };
+      } catch (e) {
+        console.warn('loginWithEmail failed.', e);
+        return { success: false, error: 'Přihlášení se nezdařilo. Zkus to prosím znovu.' };
       }
     },
 
@@ -129,6 +235,34 @@ export const createAuthSlice = (set, get) => {
 
     setPledge: (pledge) => {
       get().updateUser({ pledge });
+    },
+
+    // Onboarding's "slib" step is the app's real first micro-challenge (MVP1
+    // §2.5/§6.2: a sub-60s micro-activation — write one "jsem člověk, co…"
+    // sentence and publish it), not a private profile field. Persists the
+    // pledge (existing updateUser behavior) and also inserts a real public
+    // feed_posts row, so it counts as the player's first proof/UGC item.
+    // Guarded by session like every other Supabase write mid-onboarding —
+    // a session may not exist yet (e.g. still-unconfirmed email signup).
+    submitPledge: async (pledgeText) => {
+      await get().updateUser({ pledge: pledgeText });
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const u = get().user;
+          const { error } = await supabase.from('feed_posts').insert([{
+            user_id: session.user.id,
+            user_name: u?.name || DEFAULT_USER.name,
+            type: 'STATUS',
+            content: pledgeText,
+            is_public: true
+          }]);
+          if (error) throw error;
+          get().fetchFeedPosts();
+        }
+      } catch (e) {
+        console.warn('Failed to publish first-challenge feed post.', e);
+      }
     },
 
     completeOnboarding: () => {
@@ -153,24 +287,6 @@ export const createAuthSlice = (set, get) => {
         await supabase.auth.signOut();
       } catch (e) {
         console.warn('Supabase auth signout failed.', e);
-      }
-    },
-
-    unlockPass: async () => {
-      const u = get().user;
-      if (u) {
-        const updated = { ...u, passHolder: true };
-        set({ user: updated, activeModal: null });
-        localStorage.setItem('user', JSON.stringify(updated));
-
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session) {
-            await supabase.from('profiles').update({ pass_holder: true }).eq('id', session.user.id);
-          }
-        } catch (e) {
-          console.warn('Failed syncing unlockPass to database.', e);
-        }
       }
     },
 
@@ -256,6 +372,17 @@ export const createAuthSlice = (set, get) => {
           }]);
 
           if (insertError) throw insertError;
+
+          // A freshly inserted profile always means a brand-new account that
+          // still needs nickname/slib/reward — force that regardless of
+          // whatever the locally persisted step happened to be. Covers the
+          // delayed email-confirmation case: the tab that clicks the
+          // confirmation link may be a fresh one (onboardingStep defaulted
+          // to 'splash'/'login', not 'nickname') since registerWithEmail
+          // deliberately didn't advance the step before the session existed.
+          set({ user: { ...DEFAULT_USER, ...u, email: session.user.email }, onboardingStep: 'nickname' });
+          localStorage.setItem('user', JSON.stringify({ ...DEFAULT_USER, ...u, email: session.user.email }));
+          localStorage.setItem('onboardingStep', 'nickname');
           track('local_progress_migrated', { xp: u.xp, uzel: u.uzel, keys: u.keys_count, was_onboarded: get().onboarded });
         }
       } catch (e) {

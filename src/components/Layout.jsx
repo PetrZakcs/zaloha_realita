@@ -1,7 +1,7 @@
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { useEffect, useState } from 'react';
 import { useUserStore } from '../store/userStore';
 import { track } from '../lib/analytics';
+import { useIsMobile } from '../hooks/useIsMobile';
 import {
   Home as HomeIcon,
   LayoutGrid,
@@ -21,13 +21,7 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, onboarded, activeModal, openModal, addReaction } = useUserStore();
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
-
-  useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth < 1024);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  const isMobile = useIsMobile();
 
   // Redirect to Splash if not onboarded
   if (!onboarded) {

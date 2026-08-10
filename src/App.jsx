@@ -10,6 +10,8 @@ import Feed from './components/Feed';
 import Leaderboard from './components/Leaderboard';
 import Profile from './components/Profile';
 import AdminContentManager from './components/admin/AdminContentManager';
+import Terms from './components/legal/Terms';
+import Privacy from './components/legal/Privacy';
 import './styles/index.css';
 
 const AdminRoute = () => {
@@ -64,6 +66,9 @@ function App() {
         useUserStore.getState().fetchFeedPosts();
         useUserStore.getState().fetchLeaderboard();
       }
+      // Real player count for social-proof copy (e.g. onboarding) — needed
+      // pre-login too, so fetched unconditionally rather than in the branches above.
+      useUserStore.getState().fetchPlayerCount();
     });
 
     // Auth listener
@@ -90,6 +95,8 @@ function App() {
           <Route path="/profile" element={<Profile />} />
         </Route>
         <Route path="/admin" element={<AdminRoute />} />
+        <Route path="/terms" element={<Terms />} />
+        <Route path="/privacy" element={<Privacy />} />
       </Routes>
     </BrowserRouter>
   );

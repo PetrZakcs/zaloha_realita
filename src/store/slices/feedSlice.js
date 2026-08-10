@@ -92,6 +92,20 @@ export const createFeedSlice = (set, get) => {
   return {
     feed: DEFAULT_FEED,
     leaderboard: DEFAULT_LEADERBOARD,
+    // null = not loaded yet. Real social-proof copy (e.g. onboarding) must
+    // render nothing rather than a fake/zero number while this is null.
+    playerCount: null,
+
+    fetchPlayerCount: async () => {
+      try {
+        const { data, error } = await supabase.rpc('get_player_count');
+        if (!error && typeof data === 'number') {
+          set({ playerCount: data });
+        }
+      } catch (e) {
+        console.warn('Failed to fetch real player count from Supabase.', e);
+      }
+    },
 
     fetchFeedPosts: async () => {
       try {
@@ -124,11 +138,7 @@ export const createFeedSlice = (set, get) => {
 
     fetchLeaderboard: async () => {
       try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('id, display_name, xp, uzel, avatar_level')
-          .order('xp', { ascending: false })
-          .limit(20);
+        const { data, error } = await supabase.rpc('get_leaderboard', { p_limit: 20 });
 
         if (!error && data && data.length > 0) {
           const currentUser = get().user;

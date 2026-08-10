@@ -752,10 +752,12 @@ export default function ModalManager() {
               padding: '14px',
               marginTop: '18px'
             }}>
-              <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F5B73F' }}>Zvýhodněná cena</div>
+              <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F5B73F' }}>Měsíční členství</div>
               <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '26px', color: '#fff', marginTop: '4px' }}>
-                129 Kč <span style={{ fontSize: '14px', color: '#9A9AB5', fontWeight: '500' }}>/ Sezóna</span>
+                149 Kč <span style={{ fontSize: '14px', color: '#9A9AB5', fontWeight: '500' }}>/ měsíc</span>
               </div>
+              {/* TODO(klient): roční varianta — čeká na cenu a Stripe price ID od klienta.
+                  Až budou známé, přidat sem přepínač Měsíčně/Ročně a druhý priceId níže. */}
             </div>
 
             <button
@@ -764,9 +766,8 @@ export default function ModalManager() {
                 try {
                   const { data: { session } } = await supabase.auth.getSession();
                   if (!session) {
-                    updateUser({ passHolder: true });
-                    track('pass_activated', { mode: 'simulation_no_session' });
-                    alert('Simulace: Hra Pass byl úspěšně aktivován (nejsi přihlášen přes Supabase Auth).');
+                    track('pass_checkout_blocked', { reason: 'no_session' });
+                    alert('Pro aktivaci Hra Passu se prosím nejdřív přihlas.');
                     closeModal();
                     return;
                   }
@@ -778,11 +779,13 @@ export default function ModalManager() {
                       'Authorization': `Bearer ${process.env.REACT_APP_SUPABASE_ANON_KEY}`
                     },
                     body: JSON.stringify({
+                      // Potvrzeno klientem: měsíční předplatné 149 Kč/měsíc. REACT_APP_STRIPE_PRICE_ID
+                      // musí ukazovat na odpovídající recurring Price v produkčním Stripe účtu.
+                      // Roční varianta (druhý priceId) čeká na cenu od klienta — viz TODO výše
+                      // u přepínače Měsíčně/Ročně.
                       priceId: process.env.REACT_APP_STRIPE_PRICE_ID || 'price_mock_founder_pass',
                       userId: session.user.id,
                       email: session.user.email,
-                      // TODO(klient): předpokládáme předplatné, nepotvrzeno — může být
-                      // i jednorázový nákup (HANDOFF.md §8.7/8.8).
                       type: 'SUBSCRIPTION',
                       successUrl: window.location.origin + '?payment=success',
                       cancelUrl: window.location.origin + '?payment=cancel'
@@ -796,11 +799,11 @@ export default function ModalManager() {
                     throw new Error(resData.error || 'Platební bránu se nepodařilo inicializovat.');
                   }
                 } catch (err) {
-                  console.warn('Stripe checkout call failed, fallback to simulation.', err);
-                  updateUser({ passHolder: true });
-                  track('pass_activated', { mode: 'simulation_stripe_unavailable' });
-                  alert('Brána Stripe není nakonfigurována, aktivována simulace Hra Passu.');
-                  closeModal();
+                  // No fail-open free grant here: pass_holder is set ONLY by the
+                  // stripe-webhook edge function after a real, verified payment.
+                  console.warn('Stripe checkout call failed.', err);
+                  track('pass_checkout_failed', { error: String(err?.message || err) });
+                  alert('Platbu se nepodařilo zahájit. Zkus to prosím znovu později.');
                 }
               }}
               style={{
@@ -819,6 +822,10 @@ export default function ModalManager() {
             >
               Aktivovat HRA PASS
             </button>
+
+            <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', textAlign: 'center', marginTop: '10px', lineHeight: '1.5' }}>
+              Nákupem souhlasíš s <a href="/terms" style={{ color: '#9A9AB5', textDecoration: 'underline' }}>Obchodními podmínkami</a> a <a href="/privacy" style={{ color: '#9A9AB5', textDecoration: 'underline' }}>Zásadami ochrany osobních údajů</a>.
+            </div>
           </div>
         )}
 
@@ -924,7 +931,7 @@ export default function ModalManager() {
               </button>
             )}
 
-            <button 
+            <button
               onClick={() => {
                 if (window.confirm('Opravdu chceš resetovat celou aplikaci a herní pokrok?')) {
                   resetProgress();
@@ -947,6 +954,11 @@ export default function ModalManager() {
             >
               Resetovat pokrok
             </button>
+
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '14px', marginTop: '18px' }}>
+              <a href="/terms" style={{ fontFamily: 'Inter', fontSize: '12px', color: '#6B6B8A', textDecoration: 'underline' }}>Obchodní podmínky</a>
+              <a href="/privacy" style={{ fontFamily: 'Inter', fontSize: '12px', color: '#6B6B8A', textDecoration: 'underline' }}>Ochrana osobních údajů</a>
+            </div>
           </div>
         )}
 
