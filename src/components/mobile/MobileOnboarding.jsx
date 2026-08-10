@@ -26,6 +26,8 @@ export default function MobileOnboarding() {
   // instead of having to be selected and deleted first.
   const [tempName, setTempName] = useState(user?.name && user.name !== DEFAULT_USER.name ? user.name : '');
   const [tempPledge, setTempPledge] = useState('');
+  const [nameError, setNameError] = useState('');
+  const [pledgeError, setPledgeError] = useState('');
   const [pendingProvider, setPendingProvider] = useState(null);
 
   useEffect(() => {
@@ -34,12 +36,17 @@ export default function MobileOnboarding() {
     }
   }, [user?.name]);
 
+  // Both fields require real input now — they used to silently fall back to
+  // a generated default on an empty submit, which let people click straight
+  // through the whole flow without ever typing anything real.
   const handleNext = () => {
     if (onboardingStep === 'nickname') {
-      updateUser({ name: tempName.trim() || DEFAULT_USER.name });
+      if (!tempName.trim()) { setNameError('Zadej svou přezdívku.'); return; }
+      updateUser({ name: tempName.trim() });
     }
     if (onboardingStep === 'slib') {
-      submitPledge(tempPledge.trim() || DEFAULT_USER.pledge);
+      if (!tempPledge.trim()) { setPledgeError('Napiš svůj slib — ať máš co sdílet.'); return; }
+      submitPledge(tempPledge.trim());
     }
     if (onboardingStep === 'reward') {
       completeOnboarding();
@@ -99,6 +106,7 @@ export default function MobileOnboarding() {
       alignItems: 'center',
       padding: '20px'
     }}>
+      <style>{`@keyframes iwauStepFade { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }`}</style>
       {/* Persistent progress header — was previously nested only inside the
           intro step's own markup, so it disappeared for the rest of the
           flow (login/nickname/slib/reward) and the whole thing read as one
@@ -118,7 +126,10 @@ export default function MobileOnboarding() {
         </div>
       )}
 
-      <div style={{ flex: 1, minHeight: 0, width: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+      {/* key={onboardingStep} restarts the fade on every step change —
+          otherwise the swap between conditional blocks below is a hard cut,
+          which read as choppy rather than a smooth wizard flow. */}
+      <div key={onboardingStep} style={{ flex: 1, minHeight: 0, width: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', animation: 'iwauStepFade .32s cubic-bezier(.16,1,.3,1)' }}>
       {/* Step 0: Splash */}
       {onboardingStep === 'splash' && (
         <div style={{ width: '100%', maxWidth: '350px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', textAlign: 'center' }}>
@@ -229,13 +240,13 @@ export default function MobileOnboarding() {
           <input
             type="text"
             value={tempName}
-            onChange={(e) => setTempName(e.target.value)}
+            onChange={(e) => { setTempName(e.target.value); if (nameError) setNameError(''); }}
             placeholder={DEFAULT_USER.name}
             style={{
               width: '100%',
               height: '48px',
               background: '#2A2142',
-              border: '1px solid #7C3AED',
+              border: `1px solid ${nameError ? '#EF4444' : '#7C3AED'}`,
               borderRadius: `${RADIUS}px`,
               color: '#F0F0F8',
               padding: '0 16px',
@@ -244,6 +255,9 @@ export default function MobileOnboarding() {
               boxSizing: 'border-box'
             }}
           />
+          {nameError && (
+            <div style={{ color: '#EF4444', fontSize: '12px', fontFamily: 'Inter' }}>{nameError}</div>
+          )}
 
           <button onClick={handleNext} style={primaryButtonStyle}>
             Uložit přezdívku
@@ -264,13 +278,13 @@ export default function MobileOnboarding() {
 
           <textarea
             value={tempPledge}
-            onChange={(e) => setTempPledge(e.target.value)}
+            onChange={(e) => { setTempPledge(e.target.value); if (pledgeError) setPledgeError(''); }}
             placeholder={DEFAULT_USER.pledge}
             rows={4}
             style={{
               width: '100%',
               background: '#2A2142',
-              border: '1px solid #7C3AED',
+              border: `1px solid ${pledgeError ? '#EF4444' : '#7C3AED'}`,
               borderRadius: `${RADIUS}px`,
               color: '#F0F0F8',
               padding: '12px 16px',
@@ -281,6 +295,9 @@ export default function MobileOnboarding() {
               boxSizing: 'border-box'
             }}
           />
+          {pledgeError && (
+            <div style={{ color: '#EF4444', fontSize: '12px', fontFamily: 'Inter' }}>{pledgeError}</div>
+          )}
 
           <button onClick={handleNext} style={primaryButtonStyle}>
             Zveřejnit a pokračovat

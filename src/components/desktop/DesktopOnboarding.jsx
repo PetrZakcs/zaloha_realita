@@ -35,10 +35,20 @@ const Card = ({ children, maxWidth = 440 }) => (
   </div>
 );
 
+// Czech pluralizes both the noun and the verb by count (1 / 2-4 / 5+) — a
+// flat "X hráčů ... zapojilo" read as broken grammar at low numbers
+// ("1 hráčů", "2 hráčů se zapojilo" are both wrong).
+function formatPlayerCount(n) {
+  if (n === 1) return { label: '1 hráč', verb: 'se už do hry zapojil' };
+  if (n >= 2 && n <= 4) return { label: `${n} hráči`, verb: 'se už do hry zapojili' };
+  return { label: `${n.toLocaleString('cs-CZ')} hráčů`, verb: 'se už do hry zapojilo' };
+}
+
 // Ambient brand panel shown on the left for every step — matches the
 // reference design's split-panel treatment instead of a separate blank
 // splash frame (not idiomatic for a web app).
 function BrandPanel({ playerCount }) {
+  const playerCountText = playerCount != null && playerCount > 0 ? formatPlayerCount(playerCount) : null;
   return (
     <div style={{
       flex: 1,
@@ -67,7 +77,7 @@ function BrandPanel({ playerCount }) {
       </div>
       {/* Real count from get_player_count(), not a fake number — render
           nothing while it's still loading rather than show 0/a placeholder. */}
-      {playerCount != null && playerCount > 0 && (
+      {playerCountText && (
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '10px', marginTop: '32px' }}>
           <div style={{ display: 'flex' }}>
             <span style={{ width: '30px', height: '30px', borderRadius: '50%', background: '#241a3d', border: '2px solid #0D0A18' }}></span>
@@ -75,7 +85,7 @@ function BrandPanel({ playerCount }) {
             <span style={{ width: '30px', height: '30px', borderRadius: '50%', background: '#1f2a3d', border: '2px solid #0D0A18', marginLeft: '-10px' }}></span>
           </div>
           <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#6B6B8A' }}>
-            <span style={{ color: '#A78BFA', fontWeight: '600' }}>{playerCount.toLocaleString('cs-CZ')} hráčů</span> se už do hry zapojilo
+            <span style={{ color: '#A78BFA', fontWeight: '600' }}>{playerCountText.label}</span> {playerCountText.verb}
           </div>
         </div>
       )}
@@ -101,12 +111,29 @@ export default function DesktopOnboarding() {
   // keystroke instead of having to be selected and deleted first.
   const [tempName, setTempName] = useState(user?.name && user.name !== DEFAULT_USER.name ? user.name : '');
   const [tempPledge, setTempPledge] = useState('');
+  const [nameError, setNameError] = useState('');
+  const [pledgeError, setPledgeError] = useState('');
   const [pendingProvider, setPendingProvider] = useState(null);
   const { isInstallable, isInstalled, promptInstall } = usePwaInstall();
 
   useEffect(() => {
     if (user?.name && user.name !== DEFAULT_USER.name) setTempName(user.name);
   }, [user?.name]);
+
+  // Both fields require real input now — the field used to silently fall
+  // back to a generated default on an empty submit, which let people click
+  // straight through without ever typing anything real.
+  const handleNicknameSubmit = () => {
+    if (!tempName.trim()) { setNameError('Zadej svou přezdívku.'); return; }
+    updateUser({ name: tempName.trim() });
+    nextOnboardingStep(false);
+  };
+
+  const handlePledgeSubmit = () => {
+    if (!tempPledge.trim()) { setPledgeError('Napiš svůj slib — ať máš co sdílet.'); return; }
+    submitPledge(tempPledge.trim());
+    nextOnboardingStep(false);
+  };
 
   // Any step value not part of the desktop sequence (e.g. 'splash' persisted
   // from a mobile session) falls through to intro, consistent with
@@ -221,19 +248,23 @@ export default function DesktopOnboarding() {
           <input
             type="text"
             value={tempName}
-            onChange={(e) => setTempName(e.target.value)}
+            onChange={(e) => { setTempName(e.target.value); if (nameError) setNameError(''); }}
             placeholder={DEFAULT_USER.name}
             style={{
-              marginTop: '28px', width: '100%', maxWidth: '280px', height: '48px', background: '#2A2142', border: '1px solid #7C3AED',
+              marginTop: '28px', width: '100%', maxWidth: '280px', height: '48px', background: '#2A2142', border: `1px solid ${nameError ? '#EF4444' : '#7C3AED'}`,
               borderRadius: `${RADIUS}px`, color: '#F0F0F8', padding: '0 16px', fontSize: '16px', outline: 'none', boxSizing: 'border-box',
               textAlign: 'center', fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700'
             }}
           />
-          <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#6B6B8A', marginTop: '16px', maxWidth: '340px', lineHeight: '1.5' }}>
-            Vygenerovali jsme ti unikátní jméno. Můžeš ho nechat, nebo upravit.
-          </div>
+          {nameError ? (
+            <div style={{ color: '#EF4444', fontSize: '12px', fontFamily: 'Inter', marginTop: '10px' }}>{nameError}</div>
+          ) : (
+            <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#6B6B8A', marginTop: '16px', maxWidth: '340px', lineHeight: '1.5' }}>
+              Vygenerovali jsme ti unikátní jméno. Můžeš ho nechat, nebo upravit.
+            </div>
+          )}
           <button
-            onClick={() => { updateUser({ name: tempName.trim() || DEFAULT_USER.name }); nextOnboardingStep(false); }}
+            onClick={handleNicknameSubmit}
             style={{ ...primaryButtonStyle, width: '280px', marginTop: '36px' }}
           >
             Tohle jsem já
@@ -253,16 +284,19 @@ export default function DesktopOnboarding() {
         <div style={{ fontFamily: 'Inter', fontSize: '14px', color: '#6B6B8A', marginTop: '8px' }}>Dokonči tuhle větu — hned se zveřejní ve Feedu ostatním hráčům.</div>
         <textarea
           value={tempPledge}
-          onChange={(e) => setTempPledge(e.target.value)}
+          onChange={(e) => { setTempPledge(e.target.value); if (pledgeError) setPledgeError(''); }}
           placeholder={DEFAULT_USER.pledge}
           rows={4}
           style={{
-            width: '100%', background: '#2A2142', border: '1px solid #7C3AED', borderRadius: `${RADIUS}px`, color: '#F0F0F8',
+            width: '100%', background: '#2A2142', border: `1px solid ${pledgeError ? '#EF4444' : '#7C3AED'}`, borderRadius: `${RADIUS}px`, color: '#F0F0F8',
             padding: '14px 16px', fontSize: '14px', outline: 'none', resize: 'none', lineHeight: '1.5', boxSizing: 'border-box', marginTop: '20px'
           }}
         />
+        {pledgeError && (
+          <div style={{ color: '#EF4444', fontSize: '12px', fontFamily: 'Inter', marginTop: '8px' }}>{pledgeError}</div>
+        )}
         <button
-          onClick={() => { submitPledge(tempPledge.trim() || DEFAULT_USER.pledge); nextOnboardingStep(false); }}
+          onClick={handlePledgeSubmit}
           style={{ ...primaryButtonStyle, marginTop: '20px' }}
         >
           Zveřejnit a pokračovat
@@ -348,8 +382,19 @@ export default function DesktopOnboarding() {
       fontFamily: 'Inter, sans-serif',
       overflow: 'hidden'
     }}>
+      {/* key={step} restarts the fade on every step change instead of the
+          previous hard cut — same <Card> component type/position otherwise
+          wouldn't remount, so the animation would never retrigger. */}
+      <style>{`@keyframes iwauStepFade { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }`}</style>
       <BrandPanel playerCount={playerCount} />
-      <div style={{ width: '460px', flexShrink: 0, display: 'flex', flexDirection: 'column', background: '#0D0A18', overflowY: 'auto' }}>
+      <div
+        key={step}
+        style={{
+          width: '460px', flexShrink: 0, display: 'flex', flexDirection: 'column',
+          justifyContent: 'center', background: '#0D0A18', overflowY: 'auto',
+          animation: 'iwauStepFade .32s cubic-bezier(.16,1,.3,1)'
+        }}
+      >
         {rightPanel}
       </div>
     </div>

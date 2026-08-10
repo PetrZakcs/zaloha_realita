@@ -62,6 +62,11 @@ export default function EmailAuthForm({ radius = 16 }) {
     boxSizing: 'border-box'
   };
 
+  // Self-contained keyframe (not relying on the parent onboarding screen
+  // defining one) so swapping into the confirmation message, or between
+  // register/signin, doesn't read as an abrupt hard cut.
+  const fadeStyle = { animation: 'iwauFormFade .28s cubic-bezier(.16,1,.3,1)' };
+
   if (awaitingConfirmation) {
     return (
       <div style={{
@@ -73,8 +78,10 @@ export default function EmailAuthForm({ radius = 16 }) {
         background: '#1C1630',
         border: '1px solid #382C5C',
         borderRadius: `${radius}px`,
-        padding: '16px'
+        padding: '16px',
+        ...fadeStyle
       }}>
+        <style>{`@keyframes iwauFormFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }`}</style>
         <Mail size={20} color="#A78BFA" style={{ marginBottom: '8px' }} />
         <div>Zkontroluj e-mail a potvrď registraci kliknutím na odkaz, který jsme ti poslali.</div>
       </div>
@@ -83,6 +90,7 @@ export default function EmailAuthForm({ radius = 16 }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <style>{`@keyframes iwauFormFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }`}</style>
       <div style={{ display: 'flex', background: '#1C1630', border: '1px solid #382C5C', borderRadius: `${radius}px`, padding: '4px' }}>
         <button
           type="button"
@@ -97,7 +105,8 @@ export default function EmailAuthForm({ radius = 16 }) {
             fontFamily: 'Inter',
             fontWeight: '600',
             fontSize: '13px',
-            cursor: 'pointer'
+            cursor: 'pointer',
+            transition: 'background .18s, color .18s'
           }}
         >
           Vytvořit účet
@@ -115,7 +124,8 @@ export default function EmailAuthForm({ radius = 16 }) {
             fontFamily: 'Inter',
             fontWeight: '600',
             fontSize: '13px',
-            cursor: 'pointer'
+            cursor: 'pointer',
+            transition: 'background .18s, color .18s'
           }}
         >
           Přihlásit se
