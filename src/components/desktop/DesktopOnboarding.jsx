@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useUserStore } from '../../store/userStore';
-import { DEFAULT_USER } from '../../store/slices/authSlice';
-import { MessageSquare, Globe, Sparkles, MonitorDown, Check } from 'lucide-react';
+import { DEFAULT_USER, DESKTOP_ONBOARDING_STEPS } from '../../store/slices/authSlice';
+import { MessageSquare, Globe, Sparkles, MonitorDown, Check, Bot, Shield, Crown } from 'lucide-react';
 import EmailAuthForm from '../onboarding/EmailAuthForm';
 import { usePwaInstall } from '../../hooks/usePwaInstall';
+import { setRememberMe } from '../../api/supabaseClient';
 
 const RADIUS = 16;
 
@@ -93,16 +94,22 @@ function BrandPanel({ playerCount }) {
   );
 }
 
+// HANDOFF flow: 01 splash (logo/claim on the left + Google/Discord/email
+// auth on the right, all one screen) -> 02 intro (Zaya introduces herself +
+// nickname, same screen) -> 03 slib (personal pledge, published as the first
+// proof) -> 04 reward1 (short auto-advancing badge+XP toast) -> 05 reward2
+// (full celebration + optional Hra Pass upsell) -> install (desktop-only PWA
+// step) -> Dashboard.
 export default function DesktopOnboarding() {
   const {
     user,
     onboardingStep,
-    setOnboardingStep,
     nextOnboardingStep,
     completeOnboarding,
     updateUser,
     submitPledge,
     login,
+    openModal,
     playerCount
   } = useUserStore();
 
@@ -114,15 +121,31 @@ export default function DesktopOnboarding() {
   const [nameError, setNameError] = useState('');
   const [pledgeError, setPledgeError] = useState('');
   const [pendingProvider, setPendingProvider] = useState(null);
+  // Applies to all 3 auth paths on the splash step, not just email — set
+  // right before the actual sign-in call fires (see supabaseClient.js).
+  const [rememberMe, setRememberMeChecked] = useState(true);
   const { isInstallable, isInstalled, promptInstall } = usePwaInstall();
 
   useEffect(() => {
     if (user?.name && user.name !== DEFAULT_USER.name) setTempName(user.name);
   }, [user?.name]);
 
-  // Both fields require real input now — the field used to silently fall
-  // back to a generated default on an empty submit, which let people click
-  // straight through without ever typing anything real.
+  // Any step value not part of the desktop sequence (e.g. a legacy value
+  // from before this rework) falls through to splash, consistent with
+  // nextOnboardingStep's own fallback.
+  const step = DESKTOP_ONBOARDING_STEPS.includes(onboardingStep) ? onboardingStep : 'splash';
+
+  // reward1 is a short auto-advancing toast (badge + XP, no button) — moves
+  // on to reward2 by itself after a beat instead of waiting for a click.
+  useEffect(() => {
+    if (step !== 'reward1') return;
+    const t = setTimeout(() => nextOnboardingStep(false), 2000);
+    return () => clearTimeout(t);
+  }, [step, nextOnboardingStep]);
+
+  // Both fields require real input now — they used to silently fall back to
+  // a generated default on an empty submit, which let people click straight
+  // through without ever typing anything real.
   const handleNicknameSubmit = () => {
     if (!tempName.trim()) { setNameError('Zadej svou přezdívku.'); return; }
     updateUser({ name: tempName.trim() });
@@ -135,15 +158,9 @@ export default function DesktopOnboarding() {
     nextOnboardingStep(false);
   };
 
-  // Any step value not part of the desktop sequence (e.g. 'splash' persisted
-  // from a mobile session) falls through to intro, consistent with
-  // nextOnboardingStep's own fallback.
-  const step = ['intro', 'login', 'nickname', 'slib', 'reward', 'install'].includes(onboardingStep)
-    ? onboardingStep
-    : 'intro';
-
   const handleOAuthClick = async (provider) => {
     setPendingProvider(provider);
+    setRememberMe(rememberMe);
     const result = await login(provider);
     if (!result?.success) setPendingProvider(null);
   };
@@ -181,27 +198,7 @@ export default function DesktopOnboarding() {
 
   let rightPanel;
 
-  if (step === 'intro') {
-    rightPanel = (
-      <Card>
-        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '26px', color: '#F0F0F8', lineHeight: 1.25 }}>
-          Většina lidí jen konzumuje obsah.<br /><span style={{ color: '#A78BFA' }}>Hráči ne. Ti začnou okamžitě.</span>
-        </div>
-        <div style={{ fontFamily: 'Inter', fontSize: '14px', color: '#9A9AB5', marginTop: '16px', lineHeight: '1.6' }}>
-          iWau HRA REALITY je systém krátkých výzev v reálném životě. Žádné pasivní sledování. Jen quest, akce a reálný progres.
-        </div>
-        <button onClick={() => nextOnboardingStep(false)} style={{ ...primaryButtonStyle, marginTop: '28px' }}>
-          Začni hrát
-        </button>
-        <button
-          onClick={() => setOnboardingStep('login')}
-          style={{ width: '100%', height: '44px', background: 'transparent', border: '1px solid #382C5C', color: '#9A9AB5', fontFamily: 'Inter', fontWeight: '500', fontSize: '14px', borderRadius: `${RADIUS}px`, cursor: 'pointer', marginTop: '10px' }}
-        >
-          Mám už účet
-        </button>
-      </Card>
-    );
-  } else if (step === 'login') {
+  if (step === 'splash') {
     rightPanel = (
       <Card>
         <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '24px', color: '#F0F0F8' }}>Vytvoř si profil hráče</div>
@@ -222,7 +219,21 @@ export default function DesktopOnboarding() {
           <div style={{ flex: 1, height: '1px', background: '#382C5C' }}></div>
         </div>
 
-        <EmailAuthForm radius={RADIUS} />
+        <EmailAuthForm radius={RADIUS} rememberMe={rememberMe} />
+
+        <button
+          type="button"
+          onClick={() => setRememberMeChecked(v => !v)}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'transparent', border: 'none', cursor: 'pointer', padding: '10px 0 0' }}
+        >
+          <span style={{
+            width: '16px', height: '16px', borderRadius: '4px', border: `1.5px solid ${rememberMe ? '#7C3AED' : '#382C5C'}`,
+            background: rememberMe ? '#7C3AED' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+          }}>
+            {rememberMe && <Check size={11} color="#fff" strokeWidth={3} />}
+          </span>
+          <span style={{ color: '#9A9AB5', fontSize: '12px', fontFamily: 'Inter' }}>Zapamatovat si mě na tomto zařízení</span>
+        </button>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '20px', padding: '12px 14px', background: '#241C3C', border: '0.5px solid #382C5C', borderRadius: '10px' }}>
           <Sparkles size={18} color="#F5B73F" />
@@ -233,55 +244,59 @@ export default function DesktopOnboarding() {
         </div>
       </Card>
     );
-  } else if (step === 'nickname') {
+  } else if (step === 'intro') {
     rightPanel = (
       <Card>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '26px', color: '#F0F0F8' }}>Jak tě svět hry bude znát?</div>
-          <div style={{
-            width: '104px', height: '104px', borderRadius: '50%', background: '#241C3C', border: '2px solid #7C3AED',
-            boxShadow: '0 0 20px rgba(124,58,237,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '34px', color: '#A78BFA', marginTop: '36px'
+        <div style={{
+          borderRadius: '16px', border: '1px solid #382C5C',
+          background: 'repeating-linear-gradient(135deg,#1C1630,#1C1630 10px,#241C3C 10px,#241C3C 20px)',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '28px', gap: '12px', textAlign: 'center'
+        }}>
+          <span style={{
+            width: '52px', height: '52px', borderRadius: '50%', background: '#241a3d', border: '1.5px solid #7C3AED',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 18px rgba(124,58,237,.35)'
           }}>
-            {(tempName || DEFAULT_USER.name).slice(0, 2).toUpperCase()}
+            <Bot size={24} color="#A78BFA" />
+          </span>
+          <div style={{ color: '#7C3AED', fontSize: '11px', letterSpacing: '2px', fontFamily: "'JetBrains Mono', monospace" }}>ZAYA_SYSTEM // CONNECTED</div>
+          <div style={{ color: '#F0F0F8', fontSize: '20px', fontWeight: '700', fontFamily: "'Space Grotesk', sans-serif" }}>
+            Ahoj. Jsem Zaya — budu tě provázet.
           </div>
+          <div style={{ color: '#9A9AB5', fontSize: '13px', lineHeight: '1.55', fontFamily: 'Inter' }}>
+            Tohle není další appka, kterou smažeš za týden. Každý den ti dám jednu reálnou výzvu — splníš ji ve skutečném světě, ne v telefonu.
+          </div>
+        </div>
+
+        <div style={{ marginTop: '22px' }}>
+          <div style={{ color: '#F0F0F8', fontSize: '15px', fontWeight: '600', fontFamily: 'Inter', marginBottom: '10px' }}>Jak ti mám říkat?</div>
           <input
             type="text"
             value={tempName}
             onChange={(e) => { setTempName(e.target.value); if (nameError) setNameError(''); }}
             placeholder={DEFAULT_USER.name}
             style={{
-              marginTop: '28px', width: '100%', maxWidth: '280px', height: '48px', background: '#2A2142', border: `1px solid ${nameError ? '#EF4444' : '#7C3AED'}`,
-              borderRadius: `${RADIUS}px`, color: '#F0F0F8', padding: '0 16px', fontSize: '16px', outline: 'none', boxSizing: 'border-box',
-              textAlign: 'center', fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700'
+              width: '100%', height: '48px', background: '#2A2142', border: `1px solid ${nameError ? '#EF4444' : '#7C3AED'}`,
+              borderRadius: `${RADIUS}px`, color: '#F0F0F8', padding: '0 16px', fontSize: '16px', outline: 'none', boxSizing: 'border-box'
             }}
           />
-          {nameError ? (
-            <div style={{ color: '#EF4444', fontSize: '12px', fontFamily: 'Inter', marginTop: '10px' }}>{nameError}</div>
-          ) : (
-            <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#6B6B8A', marginTop: '16px', maxWidth: '340px', lineHeight: '1.5' }}>
-              Vygenerovali jsme ti unikátní jméno. Můžeš ho nechat, nebo upravit.
-            </div>
+          {nameError && (
+            <div style={{ color: '#EF4444', fontSize: '12px', fontFamily: 'Inter', marginTop: '8px' }}>{nameError}</div>
           )}
-          <button
-            onClick={handleNicknameSubmit}
-            style={{ ...primaryButtonStyle, width: '280px', marginTop: '36px' }}
-          >
-            Tohle jsem já
-          </button>
         </div>
+
+        <button onClick={handleNicknameSubmit} style={{ ...primaryButtonStyle, marginTop: '22px' }}>
+          Pokračovat
+        </button>
       </Card>
     );
   } else if (step === 'slib') {
-    // First real micro-challenge (MVP1 §2.5/§6.2), not a private profile field —
-    // submitPledge() both saves it and publishes it as a real feed_posts row.
+    // Personal commitment the app can later refer back to — and also the
+    // player's first real proof: submitPledge() saves it AND publishes it
+    // as a real feed_posts row (see authSlice.js).
     rightPanel = (
       <Card>
-        <div style={{ display: 'inline-flex', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: '500', letterSpacing: '.14em', color: '#A78BFA', border: '1px solid #3A2A6E', borderRadius: '20px', padding: '5px 14px', marginBottom: '16px' }}>
-          MIKRO-VÝZVA · 60 SEKUND
-        </div>
-        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '24px', color: '#F0F0F8' }}>Tvoje první výzva</div>
-        <div style={{ fontFamily: 'Inter', fontSize: '14px', color: '#6B6B8A', marginTop: '8px' }}>Dokonči tuhle větu — hned se zveřejní ve Feedu ostatním hráčům.</div>
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '24px', color: '#F0F0F8' }}>Tvůj slib</div>
+        <div style={{ fontFamily: 'Inter', fontSize: '14px', color: '#6B6B8A', marginTop: '8px' }}>Zavaž se k akci, ne jen k teorii — Zaya se k tomuhle slibu ještě vrátí.</div>
         <textarea
           value={tempPledge}
           onChange={(e) => { setTempPledge(e.target.value); if (pledgeError) setPledgeError(''); }}
@@ -303,16 +318,63 @@ export default function DesktopOnboarding() {
         </button>
       </Card>
     );
-  } else if (step === 'reward') {
+  } else if (step === 'reward1') {
+    // Short auto-advancing toast — no button, moves itself to reward2.
+    rightPanel = (
+      <Card>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+          <div style={{
+            width: '104px', height: '104px', borderRadius: '50%', background: 'linear-gradient(150deg,#241a3d,#1C1630)',
+            border: '1.5px solid #A78BFA', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 0 28px rgba(167,139,250,.45)', animation: 'ringPulse 1.6s ease-out infinite'
+          }}>
+            <Shield size={46} color="#A78BFA" />
+          </div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', letterSpacing: '.12em', color: '#A78BFA', textTransform: 'uppercase', marginTop: '18px' }}>
+            Odznak Doer odemčen
+          </div>
+          <div style={{
+            fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '52px', color: '#4AA8FF',
+            textShadow: '0 0 20px rgba(74,168,255,.7), 0 0 40px rgba(59,130,246,.4)', marginTop: '6px'
+          }}>
+            +10 XP
+          </div>
+        </div>
+      </Card>
+    );
+  } else if (step === 'reward2') {
     rightPanel = (
       <Card>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
           <Sparkles size={48} color="#A78BFA" />
           <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '26px', color: '#F0F0F8', marginTop: '18px' }}>Vítej v Hře Reality!</div>
           <div style={{ fontFamily: 'Inter', fontSize: '14px', color: '#9A9AB5', marginTop: '10px' }}>
-            Získáváš prvních 10 XP a klíč od Uzlu 1. Tvá první výzva čeká na nástěnce.
+            Máš prvních 10 XP a klíč od Uzlu 1. Tvá první výzva čeká na nástěnce.
           </div>
-          <button onClick={() => nextOnboardingStep(false)} style={{ ...primaryButtonStyle, marginTop: '24px' }}>
+
+          <div style={{
+            width: '100%', background: '#241C3C', border: '1px dashed #F5B73F', borderRadius: '16px',
+            padding: '14px', display: 'flex', flexDirection: 'column', gap: '8px', textAlign: 'left', marginTop: '20px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Crown size={16} color="#F5B73F" />
+              <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '13px', color: '#F0F0F8' }}>Volitelné: Hra Pass</span>
+            </div>
+            <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#9A9AB5', lineHeight: '1.5' }}>
+              Prémiové výzvy, exkluzivní odznaky a celý příběh se Zayou — 149 Kč / měsíc.
+            </div>
+            <button
+              onClick={() => { completeOnboarding(); openModal('paywall'); }}
+              style={{
+                alignSelf: 'flex-start', background: 'transparent', border: 'none', color: '#F5B73F',
+                fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', cursor: 'pointer', padding: 0, marginTop: '2px'
+              }}
+            >
+              Zjistit více →
+            </button>
+          </div>
+
+          <button onClick={() => nextOnboardingStep(false)} style={{ ...primaryButtonStyle, marginTop: '20px' }}>
             Pokračovat
           </button>
         </div>

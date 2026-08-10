@@ -1,12 +1,17 @@
 import { supabase } from '../../api/supabaseClient';
 import { track } from '../../lib/analytics';
 
-// Ordered onboarding step sequences per platform. Desktop gets an extra
-// 'install' (PWA) step at the end, right before completeOnboarding() flips
-// `onboarded`; mobile keeps its existing separate post-onboarding install
-// banner instead (see PwaInstallBanner.jsx) and never uses 'install'.
-export const MOBILE_ONBOARDING_STEPS = ['splash', 'intro', 'login', 'nickname', 'slib', 'reward'];
-export const DESKTOP_ONBOARDING_STEPS = ['intro', 'login', 'nickname', 'slib', 'reward', 'install'];
+// Ordered onboarding step sequences per platform, per the HANDOFF spec:
+// 01 splash (logo/claim + Google/Discord/email auth, all on one screen) ->
+// 02 intro (Zaya introduces herself + nickname, same screen) -> 03 slib
+// (personal pledge, published as the player's first proof) -> 04 reward1
+// (short auto-advancing badge+XP toast) -> 05 reward2 (full celebration +
+// optional Hra Pass upsell -> Dashboard). Desktop gets an extra 'install'
+// (PWA) step at the end, right before completeOnboarding() flips `onboarded`;
+// mobile keeps its existing separate post-onboarding install banner instead
+// (see PwaInstallBanner.jsx) and never uses 'install'.
+export const MOBILE_ONBOARDING_STEPS = ['splash', 'intro', 'slib', 'reward1', 'reward2'];
+export const DESKTOP_ONBOARDING_STEPS = ['splash', 'intro', 'slib', 'reward1', 'reward2', 'install'];
 
 // Translates the handful of Supabase auth errors we actually expect to hit
 // into Czech, matching this app's all-Czech-copy convention. Anything
@@ -125,10 +130,16 @@ export const createAuthSlice = (set, get) => {
         uzel: 1, // story content now starts at node_order 1 (intro folded into node 1's cutscene)
         badges_count: 1
       };
-      set({ user: newUser, onboardingStep: 'nickname' });
+      // Persist the optimistic user object only — NOT the onboarding step.
+      // Advancing to 'nickname' here, before the redirect even fires, used
+      // to flash the nickname screen for an instant and left the app
+      // stranded on 'nickname' even if the user cancelled the Google/Discord
+      // consent screen and came back. The step now only advances once
+      // handleOAuthSession() confirms a real session actually landed
+      // (App.jsx's onAuthStateChange -> handleOAuthSession) — consent screen
+      // first, nickname/slib after, like it should be.
+      set({ user: newUser });
       localStorage.setItem('user', JSON.stringify(newUser));
-      localStorage.setItem('onboardingStep', 'nickname');
-      get().loadCurrentNodeData();
       track('login', { method });
 
       try {
@@ -189,8 +200,8 @@ export const createAuthSlice = (set, get) => {
 
         const needsConfirmation = !data.session;
         if (!needsConfirmation) {
-          set({ user: newUser, onboardingStep: 'nickname' });
-          localStorage.setItem('onboardingStep', 'nickname');
+          set({ user: newUser, onboardingStep: 'intro' });
+          localStorage.setItem('onboardingStep', 'intro');
           get().loadCurrentNodeData();
         } else {
           // Keep the in-memory user optimistic too (just not the onboarding
@@ -357,10 +368,23 @@ export const createAuthSlice = (set, get) => {
           await get().fetchUser(session.user.id);
         } else {
           const u = get().user || DEFAULT_USER;
+
+          // Discord already has a real, identifiable username — use it
+          // instead of the random "Hráč_XXX" placeholder so a Discord signup
+          // doesn't have to invent one from scratch; the nickname step still
+          // lets them edit/confirm it like everyone else. Google's metadata
+          // shape is less consistently a "handle" (often a full real name),
+          // so left as the generated placeholder on purpose.
+          const meta = session.user.user_metadata || {};
+          const discordName = session.user.app_metadata?.provider === 'discord'
+            ? (meta.full_name || meta.name || meta.preferred_username || meta.custom_claims?.global_name || null)
+            : null;
+          const resolvedName = discordName || u.name || DEFAULT_USER.name;
+
           const { error: insertError } = await supabase.from('profiles').insert([{
             id: session.user.id,
             email: session.user.email,
-            display_name: u.name || DEFAULT_USER.name,
+            display_name: resolvedName,
             xp: u.xp ?? 0,
             uzel: u.uzel ?? 0,
             keys_balance: u.keys_count ?? DEFAULT_USER.keys_count,
@@ -374,15 +398,17 @@ export const createAuthSlice = (set, get) => {
           if (insertError) throw insertError;
 
           // A freshly inserted profile always means a brand-new account that
-          // still needs nickname/slib/reward — force that regardless of
+          // still needs intro/slib/reward — force that regardless of
           // whatever the locally persisted step happened to be. Covers the
           // delayed email-confirmation case: the tab that clicks the
           // confirmation link may be a fresh one (onboardingStep defaulted
-          // to 'splash'/'login', not 'nickname') since registerWithEmail
-          // deliberately didn't advance the step before the session existed.
-          set({ user: { ...DEFAULT_USER, ...u, email: session.user.email }, onboardingStep: 'nickname' });
-          localStorage.setItem('user', JSON.stringify({ ...DEFAULT_USER, ...u, email: session.user.email }));
-          localStorage.setItem('onboardingStep', 'nickname');
+          // to 'splash') since registerWithEmail deliberately didn't advance
+          // the step before the session existed.
+          const finalUser = { ...DEFAULT_USER, ...u, name: resolvedName, email: session.user.email };
+          set({ user: finalUser, onboardingStep: 'intro' });
+          localStorage.setItem('user', JSON.stringify(finalUser));
+          localStorage.setItem('onboardingStep', 'intro');
+          get().loadCurrentNodeData();
           track('local_progress_migrated', { xp: u.xp, uzel: u.uzel, keys: u.keys_count, was_onboarded: get().onboarded });
         }
       } catch (e) {

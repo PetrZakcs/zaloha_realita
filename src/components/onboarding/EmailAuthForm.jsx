@@ -2,12 +2,16 @@ import { useState } from 'react';
 import { Mail } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { isValidEmail, isValidPassword } from '../../utils/validation';
+import { setRememberMe } from '../../api/supabaseClient';
 
 // Shared between MobileOnboarding and DesktopOnboarding — the email/password
 // register+sign-in mini-form is identical in behavior on both platforms, only
 // its outer container (card width, spacing) differs, so this owns all state
 // and just takes a `radius` prop to match whichever platform embeds it.
-export default function EmailAuthForm({ radius = 16 }) {
+// `rememberMe` comes from the shared checkbox on the splash step (applies to
+// OAuth too, not just this form) — set right before the actual sign-in call
+// so the Supabase client's storage adapter picks it up when it writes tokens.
+export default function EmailAuthForm({ radius = 16, rememberMe = true }) {
   const { registerWithEmail, loginWithEmail } = useUserStore();
   const [mode, setMode] = useState('register'); // 'register' | 'signin'
   const [email, setEmail] = useState('');
@@ -29,6 +33,7 @@ export default function EmailAuthForm({ radius = 16 }) {
     }
     setFieldError('');
     setSubmitting(true);
+    setRememberMe(rememberMe);
     const result = mode === 'register'
       ? await registerWithEmail(email, password)
       : await loginWithEmail(email, password);
@@ -43,7 +48,7 @@ export default function EmailAuthForm({ radius = 16 }) {
       return;
     }
     // Otherwise: registerWithEmail already advanced onboardingStep to
-    // 'nickname' itself, or loginWithEmail's success will resolve into
+    // 'intro' itself, or loginWithEmail's success will resolve into
     // onboarded:true asynchronously via App.jsx's auth listener — nothing
     // further to do here in either case.
   };
