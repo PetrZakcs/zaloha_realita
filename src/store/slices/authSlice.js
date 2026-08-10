@@ -17,6 +17,19 @@ export const DESKTOP_ONBOARDING_STEPS = ['splash', 'intro', 'slib', 'reward1', '
 // into Czech, matching this app's all-Czech-copy convention. Anything
 // unrecognized falls back to a generic message rather than leaking raw
 // English Supabase error text into the UI.
+// profiles.display_name is UNIQUE NOT NULL — the old 'Hráč_' + 0-999
+// generator only had 1000 possible values, so after enough test signups a
+// collision became a real, repeatable failure: the INSERT would fail on the
+// unique constraint, get swallowed by handleOAuthSession's catch block, and
+// leave a genuinely-authenticated user stuck with no profiles row at all
+// (looked exactly like being logged out, even though the OAuth login had
+// actually succeeded). Wide enough keyspace here that a first collision is
+// unlikely; handleOAuthSession also retries with a fresh name on conflict
+// as a second line of defense.
+function generateRandomName() {
+  return 'Hráč_' + Math.floor(Math.random() * 1000000);
+}
+
 function mapSupabaseAuthError(error) {
   const msg = error?.message || '';
   if (/invalid login credentials/i.test(msg)) return 'Nesprávný e-mail nebo heslo.';
@@ -124,7 +137,7 @@ export const createAuthSlice = (set, get) => {
     },
 
     login: async (method) => {
-      const randomName = 'Hráč_' + Math.floor(Math.random() * 1000);
+      const randomName = generateRandomName();
       const newUser = {
         ...DEFAULT_USER,
         name: randomName,
@@ -178,7 +191,7 @@ export const createAuthSlice = (set, get) => {
     // handleOAuthSession()'s new-profile branch picks up the right
     // name/bonus key instead of falling back to defaults.
     registerWithEmail: async (email, password) => {
-      const randomName = 'Hráč_' + Math.floor(Math.random() * 1000);
+      const randomName = generateRandomName();
       const newUser = {
         ...DEFAULT_USER,
         name: randomName,
@@ -397,21 +410,34 @@ export const createAuthSlice = (set, get) => {
           const discordName = session.user.app_metadata?.provider === 'discord'
             ? (meta.full_name || meta.name || meta.preferred_username || meta.custom_claims?.global_name || null)
             : null;
-          const resolvedName = discordName || u.name || DEFAULT_USER.name;
+          let attemptName = discordName || u.name || DEFAULT_USER.name;
 
-          const { error: insertError } = await supabase.from('profiles').insert([{
-            id: session.user.id,
-            email: session.user.email,
-            display_name: resolvedName,
-            xp: u.xp ?? 0,
-            uzel: u.uzel ?? 0,
-            keys_balance: u.keys_count ?? DEFAULT_USER.keys_count,
-            current_streak: u.streak ?? 0,
-            avatar_level: u.badges_count ?? 0,
-            pledge: u.pledge || DEFAULT_USER.pledge,
-            pass_holder: u.passHolder || false,
-            discord_user_id: u.discord_user_id || null
-          }]);
+          // display_name is UNIQUE NOT NULL — a collision (most likely on
+          // the generated placeholder, see generateRandomName's comment) must
+          // not just fail the whole signup silently. Retry a few times with
+          // a fresh name instead of leaving an authenticated user with no
+          // profile row at all.
+          let insertError = null;
+          for (let attempt = 0; attempt < 5; attempt++) {
+            const { error } = await supabase.from('profiles').insert([{
+              id: session.user.id,
+              email: session.user.email,
+              display_name: attemptName,
+              xp: u.xp ?? 0,
+              uzel: u.uzel ?? 0,
+              keys_balance: u.keys_count ?? DEFAULT_USER.keys_count,
+              current_streak: u.streak ?? 0,
+              avatar_level: u.badges_count ?? 0,
+              pledge: u.pledge || DEFAULT_USER.pledge,
+              pass_holder: u.passHolder || false,
+              discord_user_id: u.discord_user_id || null
+            }]);
+            insertError = error;
+            if (!error) break;
+            const isNameCollision = error.code === '23505' && /display_name/i.test(error.message || error.details || '');
+            if (!isNameCollision) break;
+            attemptName = discordName ? `${discordName}_${Math.floor(Math.random() * 10000)}` : generateRandomName();
+          }
 
           if (insertError) throw insertError;
 
@@ -422,7 +448,7 @@ export const createAuthSlice = (set, get) => {
           // confirmation link may be a fresh one (onboardingStep defaulted
           // to 'splash') since registerWithEmail deliberately didn't advance
           // the step before the session existed.
-          const finalUser = { ...DEFAULT_USER, ...u, name: resolvedName, email: session.user.email };
+          const finalUser = { ...DEFAULT_USER, ...u, name: attemptName, email: session.user.email };
           set({ user: finalUser, onboardingStep: 'intro' });
           localStorage.setItem('user', JSON.stringify(finalUser));
           localStorage.setItem('onboardingStep', 'intro');
