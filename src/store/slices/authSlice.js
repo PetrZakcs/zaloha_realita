@@ -75,11 +75,18 @@ export const createAuthSlice = (set, get) => {
     // Internal bookkeeping only (not meant to be read by components) — see
     // handleOAuthSession's race guard below.
     _handlingOAuthSessionId: null,
+    // True once the initial Supabase session check has fully resolved (either
+    // a profile was loaded and onboarded:true set, or no session was found and
+    // the splash screen should be shown). When localOnboarded is already true
+    // from localStorage there's nothing to wait for — skip the loading state.
+    sessionChecked: localOnboarded,
 
     setOnboardingStep: (step) => {
       set({ onboardingStep: step });
       localStorage.setItem('onboardingStep', step);
     },
+
+    setSessionChecked: (checked) => set({ sessionChecked: checked }),
 
     nextOnboardingStep: (isMobile) => {
       const steps = isMobile ? MOBILE_ONBOARDING_STEPS : DESKTOP_ONBOARDING_STEPS;
@@ -380,6 +387,14 @@ export const createAuthSlice = (set, get) => {
         }
       } catch (e) {
         console.warn('Supabase fetchUser failed, using local storage.');
+        // If we have cached user data from a previous successful login AND
+        // localStorage says the user was onboarded, restore that state rather
+        // than leaving them on the splash screen because of a transient network
+        // error. They'll get stale profile data until the next successful fetch.
+        if (!get().onboarded && localStorage.getItem('onboarded') === 'true') {
+          const cachedUser = get().user;
+          if (cachedUser) set({ onboarded: true });
+        }
       }
     },
 
@@ -469,8 +484,12 @@ export const createAuthSlice = (set, get) => {
         }
       } catch (e) {
         console.warn('Failed to resolve OAuth session profile.', e);
+        // Even on total failure, mark session as checked so the loading screen
+        // clears and the user can interact with the splash / login UI.
       } finally {
-        set({ _handlingOAuthSessionId: null });
+        // sessionChecked: true MUST always land here regardless of the outcome
+        // above — it's the signal that lets the loading screen resolve.
+        set({ _handlingOAuthSessionId: null, sessionChecked: true });
       }
     }
   };

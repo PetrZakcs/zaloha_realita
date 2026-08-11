@@ -11,7 +11,8 @@ import OnboardingFlow from './modals/OnboardingFlow';
 export default function ModalManager() {
   const { 
     user, 
-    onboarded, 
+    onboarded,
+    sessionChecked,
     activeModal, 
     activeChallenge,
     closeModal,
@@ -77,6 +78,53 @@ export default function ModalManager() {
       if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
     };
   }, [photoPreviewUrl]);
+
+  // Show a branded loading screen while the initial Supabase session check is
+  // in flight. This prevents the onboarding splash from flashing for a
+  // returning user whose profile is being fetched asynchronously on load.
+  // sessionChecked is initialised to `true` when localStorage already has
+  // onboarded=true, so this screen is invisible for users who are already in.
+  if (!sessionChecked) {
+    return (
+      <div style={{
+        position: 'absolute',
+        inset: 0,
+        background: '#0D0A18',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 200,
+        gap: '20px'
+      }}>
+        <style>{`
+          @keyframes iwauSpinnerRing { to { transform: rotate(360deg); } }
+        `}</style>
+        {/* App logo */}
+        <span style={{ display: 'inline-flex', width: '52px', height: '52px', filter: 'drop-shadow(0 0 20px rgba(124,58,237,.6))' }}>
+          <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ width: '100%', height: '100%' }}>
+            <defs>
+              <linearGradient id="iwg_spinner_logo" x1="8" y1="5" x2="40" y2="42" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stopColor="#B24EE8" />
+                <stop offset="1" stopColor="#6E18A0" />
+              </linearGradient>
+            </defs>
+            <path d="M11 5 L24 13 L37 5 L43 19 L35 42 L24 34 L13 42 L5 19 Z" fill="url(#iwg_spinner_logo)" stroke="url(#iwg_spinner_logo)" strokeWidth="3" strokeLinejoin="round" />
+            <path d="M24 25 L24 11 M24 25 L13.5 36 M24 25 L34.5 36" fill="none" stroke="#fff" strokeWidth="5.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
+        {/* Spinner ring */}
+        <div style={{
+          width: '28px',
+          height: '28px',
+          borderRadius: '50%',
+          border: '2.5px solid #1E1535',
+          borderTopColor: '#A78BFA',
+          animation: 'iwauSpinnerRing 0.75s linear infinite'
+        }} />
+      </div>
+    );
+  }
 
   // If onboarded and no active modal, do not render anything
   if (onboarded && !activeModal) {

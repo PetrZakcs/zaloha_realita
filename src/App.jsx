@@ -63,6 +63,9 @@ function App() {
         localStorage.setItem('userId', session.user.id);
         useUserStore.getState().handleOAuthSession(session);
       } else {
+        // No active session — mark checked so the loading screen clears and
+        // the splash / login UI can be shown.
+        useUserStore.getState().setSessionChecked(true);
         useUserStore.getState().fetchFeedPosts();
         useUserStore.getState().fetchLeaderboard();
       }
@@ -71,9 +74,14 @@ function App() {
       useUserStore.getState().fetchPlayerCount();
     });
 
-    // Auth listener
+    // Auth listener — only reacts to SIGNED_IN (a genuine new login event).
+    // INITIAL_SESSION is already handled by getSession() above, so listening
+    // to it here too would call handleOAuthSession twice with the same session
+    // on every page load. TOKEN_REFRESHED / USER_UPDATED don't need a full
+    // profile re-fetch. Filtering here is what prevents the double-call that
+    // the _handlingOAuthSessionId guard was originally masking.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session) {
+      if (event === 'SIGNED_IN' && session) {
         localStorage.setItem('userId', session.user.id);
         useUserStore.getState().handleOAuthSession(session);
       }
