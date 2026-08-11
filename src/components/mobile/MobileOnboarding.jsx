@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useUserStore } from '../../store/userStore';
 import { DEFAULT_USER, MOBILE_ONBOARDING_STEPS } from '../../store/slices/authSlice';
-import { Sparkles, Bot, Shield, Crown, Check } from 'lucide-react';
+import { Sparkles, Bot, Shield, Crown, Check, Share } from 'lucide-react';
 import EmailAuthForm from '../onboarding/EmailAuthForm';
 import { GoogleIcon, DiscordIcon } from '../onboarding/AuthIcons';
 import { setRememberMe } from '../../api/supabaseClient';
+import { usePwaInstall } from '../../hooks/usePwaInstall';
 
 const RADIUS = 16;
 
@@ -24,6 +25,11 @@ export default function MobileOnboarding() {
     login,
     openModal
   } = useUserStore();
+  // iOS Safari has no beforeinstallprompt API at all — the post-onboarding
+  // PwaInstallBanner (Layout.jsx) already has iOS-specific instructions, but
+  // it's easy to miss as a passive banner. Surfacing it explicitly on the
+  // last onboarding screen too, matching desktop's dedicated install step.
+  const { isIOS, isInstalled: pwaInstalled } = usePwaInstall();
 
   // Fields start empty — the suggested name/pledge shows only as a native
   // placeholder (DEFAULT_USER below) so it vanishes on the first keystroke
@@ -346,6 +352,21 @@ export default function MobileOnboarding() {
                 Zjistit více →
               </button>
             </div>
+
+            {/* iOS Safari has no beforeinstallprompt API — the Share sheet is
+                the only way to add to Home Screen there, so this has to be
+                explicit instructions, not a button. */}
+            {isIOS && !pwaInstalled && (
+              <div style={{
+                width: '100%', background: '#1C1630', border: '0.5px solid #382C5C', borderRadius: '14px',
+                padding: '12px 14px', display: 'flex', alignItems: 'center', gap: '10px', textAlign: 'left'
+              }}>
+                <Share size={18} color="#A78BFA" style={{ flexShrink: 0 }} />
+                <span style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F0F0F8' }}>
+                  Přidej si appku na plochu: klepni na <strong>Sdílet</strong> a pak <strong>Přidat na plochu</strong>.
+                </span>
+              </div>
+            )}
 
             <button onClick={() => completeOnboarding()} style={primaryButtonStyle}>
               Otevřít hlavní panel

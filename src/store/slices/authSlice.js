@@ -219,6 +219,10 @@ export const createAuthSlice = (set, get) => {
           set({ user: newUser, onboardingStep: 'intro' });
           localStorage.setItem('onboardingStep', 'intro');
           get().loadCurrentNodeData();
+          // Drive the actual profiles-row creation directly too, same reason
+          // as loginWithEmail — don't leave it solely to the async listener.
+          localStorage.setItem('userId', data.session.user.id);
+          get().handleOAuthSession(data.session);
         } else {
           // Keep the in-memory user optimistic too (just not the onboarding
           // step) so the current tab's UI — name previews, etc. — has
@@ -234,21 +238,29 @@ export const createAuthSlice = (set, get) => {
       }
     },
 
-    // Existing account via email/password. Deliberately does NOT touch
-    // onboardingStep (unlike login()/registerWithEmail above) — this is the
-    // one action where forcing a step would be wrong: signInWithPassword also
-    // doesn't navigate away, so a naive forced 'nickname' would flash that
-    // screen at a returning user for a moment before the async
-    // onAuthStateChange -> handleOAuthSession -> fetchUser chain resolves and
-    // correctly flips `onboarded:true`. Just await the sign-in and let that
-    // existing chain do its job.
+    // Existing account via email/password. Deliberately does NOT force
+    // onboardingStep (unlike login()/registerWithEmail above) — a naive
+    // forced 'nickname'/'intro' would flash that screen at a returning user.
+    // It DOES call handleOAuthSession itself with the session signInWithPassword
+    // just handed back, rather than only waiting on App.jsx's onAuthStateChange
+    // listener to eventually deliver the same session — that passive path is
+    // what silently stalled ("nefunguje přihlašování") when the listener took
+    // a moment (or, on some browsers, didn't fire promptly) to catch up: the
+    // button would flip back to normal with no visible error and no visible
+    // success either. Calling it directly here makes success deterministic;
+    // the listener still fires too, but handleOAuthSession's own in-flight
+    // guard makes that redundant call a no-op instead of a race.
     loginWithEmail: async (email, password) => {
       try {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
           return { success: false, error: mapSupabaseAuthError(error) };
         }
         track('login', { method: 'email_signin' });
+        if (data?.session) {
+          localStorage.setItem('userId', data.session.user.id);
+          await get().handleOAuthSession(data.session);
+        }
         return { success: true };
       } catch (e) {
         console.warn('loginWithEmail failed.', e);
