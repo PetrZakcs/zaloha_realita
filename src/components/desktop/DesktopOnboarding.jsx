@@ -5,7 +5,6 @@ import { Sparkles, MonitorDown, Check, Bot, Shield, Crown } from 'lucide-react';
 import EmailAuthForm from '../onboarding/EmailAuthForm';
 import { GoogleIcon, DiscordIcon } from '../onboarding/AuthIcons';
 import { usePwaInstall } from '../../hooks/usePwaInstall';
-import { setRememberMe } from '../../api/supabaseClient';
 
 const RADIUS = 16;
 
@@ -122,9 +121,6 @@ export default function DesktopOnboarding() {
   const [nameError, setNameError] = useState('');
   const [pledgeError, setPledgeError] = useState('');
   const [pendingProvider, setPendingProvider] = useState(null);
-  // Applies to all 3 auth paths on the splash step, not just email — set
-  // right before the actual sign-in call fires (see supabaseClient.js).
-  const [rememberMe, setRememberMeChecked] = useState(true);
   const { isInstallable, isInstalled, promptInstall } = usePwaInstall();
 
   useEffect(() => {
@@ -161,7 +157,6 @@ export default function DesktopOnboarding() {
 
   const handleOAuthClick = async (provider) => {
     setPendingProvider(provider);
-    setRememberMe(rememberMe);
     const result = await login(provider);
     if (!result?.success) setPendingProvider(null);
   };
@@ -220,21 +215,7 @@ export default function DesktopOnboarding() {
           <div style={{ flex: 1, height: '1px', background: '#382C5C' }}></div>
         </div>
 
-        <EmailAuthForm radius={RADIUS} rememberMe={rememberMe} />
-
-        <button
-          type="button"
-          onClick={() => setRememberMeChecked(v => !v)}
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'transparent', border: 'none', cursor: 'pointer', padding: '10px 0 0' }}
-        >
-          <span style={{
-            width: '16px', height: '16px', borderRadius: '4px', border: `1.5px solid ${rememberMe ? '#7C3AED' : '#382C5C'}`,
-            background: rememberMe ? '#7C3AED' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
-          }}>
-            {rememberMe && <Check size={11} color="#fff" strokeWidth={3} />}
-          </span>
-          <span style={{ color: '#9A9AB5', fontSize: '12px', fontFamily: 'Inter' }}>Zapamatovat si mě na tomto zařízení</span>
-        </button>
+        <EmailAuthForm radius={RADIUS} />
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '20px', padding: '12px 14px', background: '#241C3C', border: '0.5px solid #382C5C', borderRadius: '10px' }}>
           <Sparkles size={18} color="#F5B73F" />

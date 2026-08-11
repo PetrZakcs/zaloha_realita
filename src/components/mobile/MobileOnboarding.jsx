@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useUserStore } from '../../store/userStore';
 import { DEFAULT_USER, MOBILE_ONBOARDING_STEPS } from '../../store/slices/authSlice';
-import { Sparkles, Bot, Shield, Crown, Check, Share } from 'lucide-react';
+import { Sparkles, Bot, Shield, Crown, Share } from 'lucide-react';
 import EmailAuthForm from '../onboarding/EmailAuthForm';
 import { GoogleIcon, DiscordIcon } from '../onboarding/AuthIcons';
-import { setRememberMe } from '../../api/supabaseClient';
 import { usePwaInstall } from '../../hooks/usePwaInstall';
 
 const RADIUS = 16;
@@ -39,9 +38,6 @@ export default function MobileOnboarding() {
   const [nameError, setNameError] = useState('');
   const [pledgeError, setPledgeError] = useState('');
   const [pendingProvider, setPendingProvider] = useState(null);
-  // Applies to all 3 auth paths on the splash step, not just email — set
-  // right before the actual sign-in call fires (see supabaseClient.js).
-  const [rememberMe, setRememberMeChecked] = useState(true);
 
   useEffect(() => {
     if (user?.name && user.name !== DEFAULT_USER.name) {
@@ -71,7 +67,6 @@ export default function MobileOnboarding() {
 
   const handleOAuthClick = async (provider) => {
     setPendingProvider(provider);
-    setRememberMe(rememberMe);
     const result = await login(provider);
     // OAuth navigates away on success, so this only really resolves on
     // failure (or for the local-only fallback) — reset the button either way.
@@ -179,21 +174,7 @@ export default function MobileOnboarding() {
               <div style={{ flex: 1, height: '1px', background: '#382C5C' }}></div>
             </div>
 
-            <EmailAuthForm radius={RADIUS} rememberMe={rememberMe} />
-
-            <button
-              type="button"
-              onClick={() => setRememberMeChecked(v => !v)}
-              style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 0', alignSelf: 'center' }}
-            >
-              <span style={{
-                width: '16px', height: '16px', borderRadius: '4px', border: `1.5px solid ${rememberMe ? '#7C3AED' : '#382C5C'}`,
-                background: rememberMe ? '#7C3AED' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
-              }}>
-                {rememberMe && <Check size={11} color="#fff" strokeWidth={3} />}
-              </span>
-              <span style={{ color: '#9A9AB5', fontSize: '12px', fontFamily: 'Inter' }}>Zapamatovat si mě na tomto zařízení</span>
-            </button>
+            <EmailAuthForm radius={RADIUS} />
           </div>
         )}
 
