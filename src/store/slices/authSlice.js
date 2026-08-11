@@ -466,7 +466,23 @@ export const createAuthSlice = (set, get) => {
             attemptName = discordName ? `${discordName}_${Math.floor(Math.random() * 10000)}` : generateRandomName();
           }
 
-          if (insertError) throw insertError;
+          if (insertError) {
+            // A 23505 error on a column other than display_name almost certainly
+            // means the PRIMARY KEY (id) already exists — i.e. the profile was
+            // there all along but maybeSingle() returned null because its query
+            // ran without auth headers (JWT not yet propagated — see the SIGNED_IN
+            // comment in App.jsx). Rather than bailing out and leaving the user
+            // stuck on splash, fall back to loading the existing profile.
+            // The `return` here still executes the finally block (sessionChecked).
+            const isProfileAlreadyExists =
+              insertError.code === '23505' &&
+              !/display_name/i.test(insertError.message || insertError.details || '');
+            if (isProfileAlreadyExists) {
+              await get().fetchUser(session.user.id);
+              return;
+            }
+            throw insertError;
+          }
 
           // A freshly inserted profile always means a brand-new account that
           // still needs intro/slib/reward — force that regardless of

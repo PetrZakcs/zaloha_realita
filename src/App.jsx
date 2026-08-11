@@ -74,17 +74,27 @@ function App() {
       useUserStore.getState().fetchPlayerCount();
     });
 
-    // Auth listener — only reacts to SIGNED_IN (a genuine new login event).
-    // INITIAL_SESSION is already handled by getSession() above, so listening
-    // to it here too would call handleOAuthSession twice with the same session
-    // on every page load. TOKEN_REFRESHED / USER_UPDATED don't need a full
-    // profile re-fetch. Filtering here is what prevents the double-call that
-    // the _handlingOAuthSessionId guard was originally masking.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        localStorage.setItem('userId', session.user.id);
-        useUserStore.getState().handleOAuthSession(session);
-      }
+    // Auth listener — intentionally does NOT call handleOAuthSession here.
+    //
+    // Root cause of the re-login bug: Supabase fires the SIGNED_IN event
+    // synchronously INSIDE signInWithPassword()'s own session processing,
+    // BEFORE the JWT has fully propagated to the client. If this listener
+    // called handleOAuthSession, its maybeSingle() query would run without
+    // auth headers → RLS ("Allow users to read their own profile") blocks
+    // the read → returns null → code thinks it's a new user → tries INSERT
+    // → fails on PRIMARY KEY constraint → catch → user stuck on splash.
+    //
+    // Instead, each login path handles handleOAuthSession at the right moment:
+    //   • Email/password: loginWithEmail() calls it directly AFTER
+    //     signInWithPassword() resolves (JWT is guaranteed set by then).
+    //   • OAuth redirect: a fresh page load runs getSession() above, which
+    //     also fires only after the client has fully processed the hash token.
+    //   • Email confirm link: same fresh-page-load path via getSession().
+    //
+    // Subscription kept alive for future cross-tab SIGNED_OUT sync.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, _session) => {
+      // No-op for now — all auth transitions handled at call sites above.
+      void event;
     });
 
     track('app_opened', { date: new Date().toISOString().slice(0, 10) });
