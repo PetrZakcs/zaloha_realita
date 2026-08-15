@@ -9,6 +9,8 @@ import Story from './components/Story';
 import Feed from './components/Feed';
 import Leaderboard from './components/Leaderboard';
 import Profile from './components/Profile';
+import PublicProfile from './components/PublicProfile';
+import Inventory from './components/Inventory';
 import AdminContentManager from './components/admin/AdminContentManager';
 import Terms from './components/legal/Terms';
 import Privacy from './components/legal/Privacy';
@@ -57,6 +59,29 @@ const AdminRoute = () => {
 
 function App() {
   useEffect(() => {
+    // Capture ?ref=CODE (spec-7 referral links) as early as possible, before any redirect
+    // (OAuth consent screen, email confirmation) can strip the query string. Persisted to
+    // localStorage — same pattern as the optimistic `user`/`onboardingStep` — so it survives
+    // through to whichever moment a fresh profile actually gets INSERTed
+    // (handleOAuthSession() in authSlice.js), which may be a different page load entirely.
+    // Never overwrites an already-pending code — first link a device saw wins, so bouncing
+    // through a second, unrelated referral link before signing up doesn't reassign credit.
+    const refCode = new URLSearchParams(window.location.search).get('ref');
+    if (refCode && !localStorage.getItem('pendingReferralCode')) {
+      localStorage.setItem('pendingReferralCode', refCode.toUpperCase());
+    }
+
+    // spec-11 monetization KPI: "% dokončí nákup" / "čas od vstupu do nákupu" — the actual
+    // pass_holder flip happens server-side (stripe-webhook), invisible to the client, and
+    // Stripe Checkout navigates the browser away entirely, so ?payment=success on return
+    // (see stripe-checkout's successUrl in ModalManager.jsx) was previously the only signal
+    // the client ever gets that a purchase happened — and nothing read it at all. Stripped
+    // from the URL right after so a refresh doesn't re-fire it.
+    if (new URLSearchParams(window.location.search).get('payment') === 'success') {
+      track('pass_purchase_completed');
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+
     // Check initial active session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
@@ -111,6 +136,8 @@ function App() {
           <Route path="/feed" element={<Feed />} />
           <Route path="/leaderboard" element={<Leaderboard />} />
           <Route path="/profile" element={<Profile />} />
+          <Route path="/profile/:userId" element={<PublicProfile />} />
+          <Route path="/inventory" element={<Inventory />} />
         </Route>
         <Route path="/admin" element={<AdminRoute />} />
         <Route path="/terms" element={<Terms />} />

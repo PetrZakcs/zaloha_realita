@@ -45,18 +45,33 @@ serve(async (req) => {
       const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
       const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-      // 1. Update user profile to pass_holder = true
-      const { error: profileError } = await supabase
-        .from("profiles")
-        .update({ pass_holder: true })
-        .eq("id", userId);
+      const isSubscription = session.mode === "subscription";
 
-      if (profileError) {
-        console.error(`Failed to update profile for user ${userId}:`, profileError);
-        return new Response("Database update failed", { status: 500 });
+      // 1. Update user profile to pass_holder = true — SUBSCRIPTION only. This previously
+      //    ran unconditionally for every completed checkout, which meant a DEPOSIT_TEST
+      //    payment (MVP1 spec-8 "rezervuj si místo v další sezóně" willingness-to-pay
+      //    signal, a deliberately smaller/separate commitment — 49/99 Kč, refundable) also
+      //    silently granted full Founder Pass access. Not currently reachable from the
+      //    shipped UI (nothing calls stripe-checkout with type: "DEPOSIT_TEST" yet), but
+      //    worth closing now rather than leaving a live grant-Pass-for-a-deposit bug for
+      //    whoever wires that flow up next.
+      let displayName: string | null = null;
+      if (isSubscription) {
+        const { data: updatedProfile, error: profileError } = await supabase
+          .from("profiles")
+          .update({ pass_holder: true })
+          .eq("id", userId)
+          .select("display_name")
+          .single();
+
+        if (profileError) {
+          console.error(`Failed to update profile for user ${userId}:`, profileError);
+          return new Response("Database update failed", { status: 500 });
+        }
+
+        displayName = updatedProfile?.display_name ?? null;
+        console.log(`Successfully activated Founder Pass for user ${userId}`);
       }
-
-      console.log(`Successfully activated Founder Pass for user ${userId}`);
 
       // 2. Insert transactional record into payments
       const amountCzk = Math.round((session.amount_total || 0) / 100);
@@ -67,13 +82,31 @@ serve(async (req) => {
         .insert({
           user_id: userId,
           stripe_payment_intent_id: paymentIntentId,
-          type: session.mode === "subscription" ? "SUBSCRIPTION" : "DEPOSIT_TEST",
+          type: isSubscription ? "SUBSCRIPTION" : "DEPOSIT_TEST",
           amount_czk: amountCzk,
           status: "SUCCEEDED"
         });
 
       if (paymentError) {
         console.warn(`Failed to log payment transaction for user ${userId}:`, paymentError);
+      }
+
+      // 3. Status feed post (spec-6 §8 "Founder Pass aktivace" trigger) — announces the
+      //    upgrade publicly the same way a badge/title unlock does.
+      if (isSubscription && displayName) {
+        const { error: statusPostError } = await supabase
+          .from("feed_posts")
+          .insert({
+            user_id: userId,
+            user_name: displayName,
+            type: "STATUS",
+            content: `${displayName} se stal/a Founder hráčem.`,
+            is_public: true
+          });
+
+        if (statusPostError) {
+          console.warn(`Failed to insert Founder Pass status feed post for user ${userId}:`, statusPostError);
+        }
       }
     }
 

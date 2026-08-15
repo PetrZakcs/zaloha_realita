@@ -27,6 +27,20 @@ export const createGameplaySlice = (set, get) => ({
   activeStoryNodeSteps: [],
   allStoryNodes: [],
 
+  // "Referenční uzel" (spec-5) — shown once after season completion (today: finishing the
+  // FINAL 'Uzel 9 · Boss Fight' node). null until checkSeasonReflectionStatus() resolves,
+  // so advanceNode() knows to wait rather than assuming "not submitted yet" and flashing
+  // the flow at a returning player who already completed it in a previous session.
+  seasonReflectionSubmitted: null,
+  seasonReflectionStep: 'pre-frame', // pre-frame -> reflection -> slider -> nps -> referral-intent -> sentence -> identity-lock -> share -> unlocked
+  seasonReflectionAnswers: {
+    percent: 50,
+    wouldRecommend: null,
+    referralIntent: null,
+    sentenceTemplate: null,
+    sentenceText: ''
+  },
+
   notifications: [
     { id: 'n1', title: 'Zaya', text: 'Vítej v Hře Reality! Tvá dobrodružství začínají.', time: 'Před 2 dny', unread: false },
     { id: 'n2', title: 'Odměna', text: 'Získal jsi odznak Doer za registraci.', time: 'Před 1 dnem', unread: true }
@@ -300,7 +314,11 @@ export const createGameplaySlice = (set, get) => ({
         // back to a LOCAL-ONLY reward. This is not persisted server-side.
         console.warn('complete_challenge RPC failed, using local-only reward (not persisted).', e);
         const xpReward = c ? c.reward_xp : 50;
-        const keysReward = proofData.is_public ? (c ? c.reward_keys + 1 : 3) : (c ? c.reward_keys : 2);
+        // MVP1 spec (Feed §7): private proof grants XP but ZERO keys — mirrors the
+        // p_is_public gating in complete_challenge() (supabase_migration_profiles_security.sql).
+        // Keep this fallback's amounts in sync with that RPC, not a separate "+1 bonus"
+        // formula, so demo/offline mode doesn't quietly promise different rewards.
+        const keysReward = proofData.is_public ? (c ? c.reward_keys : 2) : 0;
         const updatedUser = {
           ...u,
           xp: u.xp + xpReward,
@@ -340,9 +358,28 @@ export const createGameplaySlice = (set, get) => ({
     set({ activeModal: 'success-overlay' });
   },
 
-  advanceNode: async () => {
+  // useFreeDaily: explicit intent flag for "Pokračovat zdarma" on the paywall moment —
+  // the server independently re-checks whether today's free slot is actually still
+  // available (supabase_migration_free_daily_node.sql) rather than trusting this value;
+  // it only tells the RPC the player has consciously chosen the free path over buying
+  // the Pass, so a first-time gate hit still surfaces 'pass_required' instead of quietly
+  // spending the slot.
+  advanceNode: async (useFreeDaily = false) => {
     const u = get().user;
     if (!u) return;
+
+    // Shared by both the RPC success path and the offline fallback below: season's over —
+    // open the "Referenční uzel" reflection flow (spec-5) the first time, or just close out
+    // silently on repeat visits once it's already been submitted (checkSeasonReflectionStatus()
+    // is expected to have already resolved this by the time a player can reach this point).
+    const handleSeasonCompleted = () => {
+      track('season_completed', { node: u.uzel });
+      if (get().seasonReflectionSubmitted) {
+        set({ activeModal: null });
+      } else {
+        set({ activeModal: 'season-reflection', seasonReflectionStep: 'pre-frame' });
+      }
+    };
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -351,15 +388,16 @@ export const createGameplaySlice = (set, get) => ({
       // Server-validated: resolves current/next node, checks REFERENTIAL/FINAL season-end
       // conditions, and enforces requires_pass against the caller's own pass_holder — all
       // previously done (or, for the pass check, never done at all) on the client against
-      // data it could freely fake. See supabase_migration_advance_node.sql.
-      const { data, error } = await supabase.rpc('advance_node');
+      // data it could freely fake. See supabase_migration_advance_node.sql and
+      // supabase_migration_free_daily_node.sql (soft-gate: 1 free story node/day past the
+      // paywall instead of a hard block).
+      const { data, error } = await supabase.rpc('advance_node', { p_use_free_daily: useFreeDaily });
       if (error) throw error;
 
       const result = Array.isArray(data) ? data[0] : data;
 
       if (result.status === 'season_completed') {
-        track('season_completed', { node: u.uzel });
-        set({ activeModal: null });
+        handleSeasonCompleted();
         return;
       }
 
@@ -369,10 +407,16 @@ export const createGameplaySlice = (set, get) => ({
         return;
       }
 
+      if (result.status === 'daily_limit_reached') {
+        track('node_daily_limit_reached', { node: u.uzel });
+        set({ activeModal: 'node-daily-limit' });
+        return;
+      }
+
       const updated = { ...u, uzel: result.new_uzel };
       set({ user: updated, activeModal: null });
       localStorage.setItem('user', JSON.stringify(updated));
-      track('node_completed', { node: result.new_uzel });
+      track('node_completed', { node: result.new_uzel, via_free_daily: useFreeDaily });
       get().loadCurrentNodeData();
     } catch (e) {
       // Same offline/demo-mode resilience as elsewhere: fall back to a local-only advance,
@@ -383,13 +427,24 @@ export const createGameplaySlice = (set, get) => ({
       const nextNode = allNodes.find(n => n.node_order === u.uzel + 1);
 
       if (nextNode && nextNode.type === 'REFERENTIAL') {
-        track('season_completed', { node: u.uzel });
-        set({ activeModal: null });
+        handleSeasonCompleted();
         return;
       }
       if (!nextNode && currentNode?.type === 'FINAL') {
-        track('season_completed', { node: u.uzel });
-        set({ activeModal: null });
+        handleSeasonCompleted();
+        return;
+      }
+
+      // Mirrors the real RPC's requires_pass gate — without this, the local-only fallback
+      // let a free player walk straight through paid content whenever the RPC call itself
+      // failed (network blip, or the request simply broken client-side). Doesn't replicate
+      // the 1-node/day free-allowance bookkeeping here — offline/demo mode just hard-gates
+      // like the rest of this fallback already does; the server remains the actual source
+      // of truth for `uzel` regardless (protect_profile_privileges locks it against direct
+      // writes), so this only affects the optimistic local UI, not real progression.
+      if (nextNode?.requires_pass && !u.passHolder && !useFreeDaily) {
+        track('node_gated_by_pass', { node: u.uzel, offline_fallback: true });
+        set({ activeModal: 'paywall' });
         return;
       }
 
@@ -397,8 +452,89 @@ export const createGameplaySlice = (set, get) => ({
       const updated = { ...u, uzel: updatedNode };
       set({ user: updated, activeModal: null });
       localStorage.setItem('user', JSON.stringify(updated));
-      track('node_completed', { node: updatedNode });
+      track('node_completed', { node: updatedNode, via_free_daily: useFreeDaily });
       get().loadCurrentNodeData();
+    }
+  },
+
+  // Checked once per session (called from fetchUser(), same place loadCurrentNodeData()/
+  // loadUnlockedCards() already get kicked off) so advanceNode()'s season_completed branch
+  // knows whether to show the reflection flow or not without an extra round-trip at the
+  // exact moment the season finishes.
+  checkSeasonReflectionStatus: async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { data, error } = await supabase
+        .from('season_reflections')
+        .select('id')
+        .eq('user_id', session.user.id)
+        .maybeSingle();
+      if (!error) {
+        set({ seasonReflectionSubmitted: !!data });
+      }
+    } catch (e) {
+      console.warn('Failed to check season reflection status.', e);
+    }
+  },
+
+  // null = not loaded yet — the paywall/settings referral CTA should render nothing (or a
+  // loading state) rather than a fake "0/2" while this is still resolving. See
+  // supabase_migration_referral_system.sql.
+  referralSignupsCount: null,
+
+  fetchReferralStats: async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { count, error } = await supabase
+        .from('referral_signups')
+        .select('id', { count: 'exact', head: true })
+        .eq('referrer_id', session.user.id);
+      if (!error) set({ referralSignupsCount: count ?? 0 });
+    } catch (e) {
+      console.warn('Failed to fetch referral stats.', e);
+    }
+  },
+
+  setSeasonReflectionStep: (step) => set({ seasonReflectionStep: step }),
+
+  updateSeasonReflectionAnswers: (fields) => set(state => ({
+    seasonReflectionAnswers: { ...state.seasonReflectionAnswers, ...fields }
+  })),
+
+  submitSeasonReflection: async () => {
+    const { percent, wouldRecommend, referralIntent, sentenceTemplate, sentenceText } = get().seasonReflectionAnswers;
+    track('season_reflection_submitted', { percent, would_recommend: wouldRecommend, referral_intent: referralIntent });
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('No active Supabase session');
+
+      // Server-validated (ranges, non-empty sentence) and server-idempotent — see
+      // supabase_migration_season_reflection.sql. This is the app's main source of hard
+      // MVP1 validation data (% transformace, NPS, referral intent, UGC), so, like
+      // complete_challenge()/advance_node(), it's never computed or trusted client-side.
+      const { data, error } = await supabase.rpc('submit_season_reflection', {
+        p_percent: percent,
+        p_would_recommend: !!wouldRecommend,
+        p_referral_intent: referralIntent ?? 0,
+        p_sentence_template: sentenceTemplate ?? 1,
+        p_sentence_text: sentenceText
+      });
+      if (error) throw error;
+
+      const result = Array.isArray(data) ? data[0] : data;
+      set({ seasonReflectionSubmitted: true, seasonReflectionStep: 'identity-lock' });
+      get().loadUnlockedCards(); // picks up the newly granted 'light-bearer-season0' card
+      return { success: true, percent: result?.transformation_percent ?? percent };
+    } catch (e) {
+      // Same offline/demo-mode resilience as submitProof()/advanceNode(): the flow itself
+      // (identity-lock -> share card -> hidden unlock) still plays out locally so a flaky
+      // connection doesn't strand the player mid-flow, it just isn't persisted server-side.
+      console.warn('submit_season_reflection RPC failed, continuing locally (not persisted).', e);
+      set({ seasonReflectionSubmitted: true, seasonReflectionStep: 'identity-lock' });
+      return { success: false, percent };
     }
   },
 
@@ -417,13 +553,23 @@ export const createGameplaySlice = (set, get) => ({
     set({
       user: null,
       onboarded: false,
-      onboardingStep: 'splash',
+      onboardingStep: 'entry',
       activeModal: null,
       storyDialogStep: 0,
       dialogCompleted: false,
       activeStoryNode: null,
       activeStoryNodeSteps: [],
-      proofsSubmittedCount: 0
+      proofsSubmittedCount: 0,
+      seasonReflectionSubmitted: null,
+      seasonReflectionStep: 'pre-frame',
+      seasonReflectionAnswers: {
+        percent: 50,
+        wouldRecommend: null,
+        referralIntent: null,
+        sentenceTemplate: null,
+        sentenceText: ''
+      },
+      welcomeBackDays: null
     });
   }
 });

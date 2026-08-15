@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useUserStore } from '../../store/userStore';
-import { DEFAULT_USER, DESKTOP_ONBOARDING_STEPS } from '../../store/slices/authSlice';
-import { Sparkles, MonitorDown, Check, Bot, Shield, Crown } from 'lucide-react';
+import { track } from '../../lib/analytics';
+import { getAvatarLevel } from '../../lib/avatarLevels';
+import { ALL_CARDS, findCard } from '../../lib/cards';
+import { DESKTOP_ONBOARDING_STEPS } from '../../store/slices/authSlice';
+import { Sparkles, MonitorDown, Check, Radio, Gift, Crown, ArrowDown, ArrowUp } from 'lucide-react';
 import EmailAuthForm from '../onboarding/EmailAuthForm';
 import { GoogleIcon, DiscordIcon } from '../onboarding/AuthIcons';
 import { usePwaInstall } from '../../hooks/usePwaInstall';
@@ -94,58 +97,45 @@ function BrandPanel({ playerCount }) {
   );
 }
 
-// HANDOFF flow: 01 splash (logo/claim on the left + Google/Discord/email
-// auth on the right, all one screen) -> 02 intro (Zaya introduces herself +
-// nickname, same screen) -> 03 slib (personal pledge, published as the first
-// proof) -> 04 reward1 (short auto-advancing badge+XP toast) -> 05 reward2
-// (full celebration + optional Hra Pass upsell) -> install (desktop-only PWA
-// step) -> Dashboard.
+// MVP1 spec-3 flow: entry (binary choice, no session) -> first-reward (local-only XP
+// preview, no session) -> login (the only step touching Supabase Auth) -> avatar-upgrade
+// (post-login beat) -> mystery-box (reveals the starter card) -> slib (pledge, published as
+// the first real proof) -> reward2 (celebration + optional Hra Pass upsell) -> install
+// (desktop-only PWA step) -> Dashboard. See DESKTOP_ONBOARDING_STEPS in authSlice.js for the
+// authoritative step list/rationale.
 export default function DesktopOnboarding() {
   const {
     user,
     onboardingStep,
     nextOnboardingStep,
     completeOnboarding,
-    updateUser,
     submitPledge,
     login,
     openModal,
     playerCount
   } = useUserStore();
 
-  // Fields start empty — the suggested name/pledge shows only as a native
-  // placeholder (via DEFAULT_USER below) so it vanishes on the first
-  // keystroke instead of having to be selected and deleted first.
-  const [tempName, setTempName] = useState(user?.name && user.name !== DEFAULT_USER.name ? user.name : '');
   const [tempPledge, setTempPledge] = useState('');
-  const [nameError, setNameError] = useState('');
   const [pledgeError, setPledgeError] = useState('');
   const [pendingProvider, setPendingProvider] = useState(null);
+  const [boxOpened, setBoxOpened] = useState(false);
   const { isInstallable, isInstalled, promptInstall } = usePwaInstall();
 
-  useEffect(() => {
-    if (user?.name && user.name !== DEFAULT_USER.name) setTempName(user.name);
-  }, [user?.name]);
-
   // Any step value not part of the desktop sequence (e.g. a legacy value
-  // from before this rework) falls through to splash, consistent with
+  // from before this rework) falls through to entry, consistent with
   // nextOnboardingStep's own fallback.
-  const step = DESKTOP_ONBOARDING_STEPS.includes(onboardingStep) ? onboardingStep : 'splash';
+  const step = DESKTOP_ONBOARDING_STEPS.includes(onboardingStep) ? onboardingStep : 'entry';
 
-  // reward1 is a short auto-advancing toast (badge + XP, no button) — moves
-  // on to reward2 by itself after a beat instead of waiting for a click.
+  // first-reward and avatar-upgrade are short auto-advancing beats (see MobileOnboarding.jsx
+  // for the same rationale) — mystery-box and slib wait for a real tap/input instead.
   useEffect(() => {
-    if (step !== 'reward1') return;
-    const t = setTimeout(() => nextOnboardingStep(false), 2000);
+    if (step !== 'first-reward' && step !== 'avatar-upgrade') return;
+    const t = setTimeout(() => nextOnboardingStep(false), step === 'first-reward' ? 1800 : 1400);
     return () => clearTimeout(t);
   }, [step, nextOnboardingStep]);
 
-  // Both fields require real input now — they used to silently fall back to
-  // a generated default on an empty submit, which let people click straight
-  // through without ever typing anything real.
-  const handleNicknameSubmit = () => {
-    if (!tempName.trim()) { setNameError('Zadej svou přezdívku.'); return; }
-    updateUser({ name: tempName.trim() });
+  const handleEntryChoice = (choice) => {
+    track('entry_choice', { choice });
     nextOnboardingStep(false);
   };
 
@@ -192,13 +182,60 @@ export default function DesktopOnboarding() {
     opacity: disabled ? 0.6 : 1
   });
 
+  const level0 = getAvatarLevel(0);
+  const level1 = getAvatarLevel(1);
+  const starterCard = findCard('doer-mvp1');
+
   let rightPanel;
 
-  if (step === 'splash') {
+  if (step === 'entry') {
     rightPanel = (
       <Card>
-        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '24px', color: '#F0F0F8' }}>Vytvoř si profil hráče</div>
-        <div style={{ fontFamily: 'Inter', fontSize: '14px', color: '#6B6B8A', marginTop: '8px' }}>Trvá to 30 sekund.</div>
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '24px', color: '#F0F0F8' }}>Tohle není hra.</div>
+        <div style={{ fontFamily: 'Inter', fontSize: '14px', color: '#6B6B8A', marginTop: '8px' }}>Vyber instinktivně.</div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '24px' }}>
+          <button onClick={() => handleEntryChoice('stagnuju')} style={{ ...oauthButtonStyle(false), height: '58px' }}>
+            <ArrowDown size={16} color="#EF4444" /> Mám pocit, že stagnuju
+          </button>
+          <button onClick={() => handleEntryChoice('posouvam')} style={{ ...oauthButtonStyle(false), height: '58px' }}>
+            <ArrowUp size={16} color="#22C55E" /> Mám pocit, že se posouvám
+          </button>
+        </div>
+      </Card>
+    );
+  } else if (step === 'first-reward') {
+    rightPanel = (
+      <Card>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+          <div style={{
+            width: '104px', height: '104px', borderRadius: '50%', background: 'linear-gradient(150deg,#241a3d,#1C1630)',
+            border: '1.5px solid #A78BFA', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 0 28px rgba(167,139,250,.45)', animation: 'ringPulse 1.6s ease-out infinite'
+          }}>
+            <Radio size={46} color="#A78BFA" />
+          </div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', letterSpacing: '.12em', color: '#A78BFA', textTransform: 'uppercase', marginTop: '18px' }}>
+            Signál zachycen
+          </div>
+          <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', marginTop: '8px' }}>98 % lidí tohle ignoruje. Ty ne.</div>
+          <div style={{
+            fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '52px', color: '#4AA8FF',
+            textShadow: '0 0 20px rgba(74,168,255,.7), 0 0 40px rgba(59,130,246,.4)', marginTop: '6px'
+          }}>
+            +50 XP
+          </div>
+          <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '13px', color: '#F0F0F8', marginTop: '8px' }}>
+            Status: Pozorovatel · Level 1
+          </div>
+        </div>
+      </Card>
+    );
+  } else if (step === 'login') {
+    rightPanel = (
+      <Card>
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '24px', color: '#F0F0F8' }}>Ulož svůj postup</div>
+        <div style={{ fontFamily: 'Inter', fontSize: '14px', color: '#6B6B8A', marginTop: '8px' }}>Pokud teď odejdeš, tenhle moment se neuloží.</div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '24px' }}>
           <button onClick={() => handleOAuthClick('google')} disabled={pendingProvider === 'google'} style={oauthButtonStyle(pendingProvider === 'google')}>
@@ -226,49 +263,69 @@ export default function DesktopOnboarding() {
         </div>
       </Card>
     );
-  } else if (step === 'intro') {
+  } else if (step === 'avatar-upgrade') {
     rightPanel = (
       <Card>
-        <div style={{
-          borderRadius: '16px', border: '1px solid #382C5C',
-          background: 'repeating-linear-gradient(135deg,#1C1630,#1C1630 10px,#241C3C 10px,#241C3C 20px)',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '28px', gap: '12px', textAlign: 'center'
-        }}>
-          <span style={{
-            width: '52px', height: '52px', borderRadius: '50%', background: '#241a3d', border: '1.5px solid #7C3AED',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 18px rgba(124,58,237,.35)'
-          }}>
-            <Bot size={24} color="#A78BFA" />
-          </span>
-          <div style={{ color: '#7C3AED', fontSize: '11px', letterSpacing: '2px', fontFamily: "'JetBrains Mono', monospace" }}>ZAYA_SYSTEM // CONNECTED</div>
-          <div style={{ color: '#F0F0F8', fontSize: '20px', fontWeight: '700', fontFamily: "'Space Grotesk', sans-serif" }}>
-            Ahoj. Jsem Zaya — budu tě provázet.
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+            <span style={{
+              width: '72px', height: '72px', borderRadius: '50%', background: '#241C3C',
+              border: `${level0.borderWidth}px solid ${level0.border}`, opacity: 0.5,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '22px', color: level0.color
+            }}>
+              {(user?.name || 'H').slice(0, 2).toUpperCase()}
+            </span>
+            <span style={{ color: '#6B6B8A', fontSize: '20px' }}>→</span>
+            <span style={{
+              width: '88px', height: '88px', borderRadius: '50%', background: '#241C3C',
+              border: `${level1.borderWidth}px solid ${level1.border}`, boxShadow: `0 0 ${level1.glow}px ${level1.border}aa`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '26px', color: level1.color,
+              animation: 'ringPulse 1.6s ease-out infinite'
+            }}>
+              {(user?.name || 'H').slice(0, 2).toUpperCase()}
+            </span>
           </div>
-          <div style={{ color: '#9A9AB5', fontSize: '13px', lineHeight: '1.55', fontFamily: 'Inter' }}>
-            Tohle není další appka, kterou smažeš za týden. Každý den ti dám jednu reálnou výzvu — splníš ji ve skutečném světě, ne v telefonu.
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', letterSpacing: '.1em', color: '#A78BFA', textTransform: 'uppercase', marginTop: '20px' }}>
+            Status aktivován
           </div>
+          <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', marginTop: '8px' }}>Tvoje identita se probouzí.</div>
         </div>
-
-        <div style={{ marginTop: '22px' }}>
-          <div style={{ color: '#F0F0F8', fontSize: '15px', fontWeight: '600', fontFamily: 'Inter', marginBottom: '10px' }}>Jak ti mám říkat?</div>
-          <input
-            type="text"
-            value={tempName}
-            onChange={(e) => { setTempName(e.target.value); if (nameError) setNameError(''); }}
-            placeholder={DEFAULT_USER.name}
-            style={{
-              width: '100%', height: '48px', background: '#2A2142', border: `1px solid ${nameError ? '#EF4444' : '#7C3AED'}`,
-              borderRadius: `${RADIUS}px`, color: '#F0F0F8', padding: '0 16px', fontSize: '16px', outline: 'none', boxSizing: 'border-box'
-            }}
-          />
-          {nameError && (
-            <div style={{ color: '#EF4444', fontSize: '12px', fontFamily: 'Inter', marginTop: '8px' }}>{nameError}</div>
+      </Card>
+    );
+  } else if (step === 'mystery-box') {
+    rightPanel = (
+      <Card>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+          {!boxOpened ? (
+            <div onClick={() => setBoxOpened(true)} style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+              <div style={{
+                width: '120px', height: '120px', borderRadius: '22px', background: 'linear-gradient(150deg,#241a3d,#1C1630)',
+                border: '1.5px dashed #A78BFA', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: '0 0 24px rgba(167,139,250,.35)'
+              }}>
+                <Gift size={48} color="#A78BFA" />
+              </div>
+              <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '14px', color: '#F0F0F8' }}>Klikni a otevři svůj první drop</div>
+            </div>
+          ) : (
+            <>
+              <div style={{
+                width: '120px', height: '120px', borderRadius: '22px', background: starterCard?.bg || '#241a3d',
+                border: `2px solid ${starterCard?.border || '#7C3AED'}`, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: `0 0 28px ${starterCard?.border || '#7C3AED'}55`
+              }}>
+                <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '16px', color: starterCard?.color || '#A78BFA' }}>{starterCard?.title || 'Doer'}</span>
+              </div>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', letterSpacing: '.1em', color: '#A78BFA', textTransform: 'uppercase', marginTop: '18px' }}>
+                Získal/a jsi kartu
+              </div>
+              <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', marginTop: '6px' }}>1 / {ALL_CARDS.length} ve tvém Inventáři</div>
+              <button onClick={() => nextOnboardingStep(false)} style={{ ...primaryButtonStyle, marginTop: '22px' }}>Pokračovat</button>
+            </>
           )}
         </div>
-
-        <button onClick={handleNicknameSubmit} style={{ ...primaryButtonStyle, marginTop: '22px' }}>
-          Pokračovat
-        </button>
       </Card>
     );
   } else if (step === 'slib') {
@@ -282,7 +339,7 @@ export default function DesktopOnboarding() {
         <textarea
           value={tempPledge}
           onChange={(e) => { setTempPledge(e.target.value); if (pledgeError) setPledgeError(''); }}
-          placeholder={DEFAULT_USER.pledge}
+          placeholder="Jsem člověk, co…"
           rows={4}
           style={{
             width: '100%', background: '#2A2142', border: `1px solid ${pledgeError ? '#EF4444' : '#7C3AED'}`, borderRadius: `${RADIUS}px`, color: '#F0F0F8',
@@ -298,30 +355,6 @@ export default function DesktopOnboarding() {
         >
           Zveřejnit a pokračovat
         </button>
-      </Card>
-    );
-  } else if (step === 'reward1') {
-    // Short auto-advancing toast — no button, moves itself to reward2.
-    rightPanel = (
-      <Card>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-          <div style={{
-            width: '104px', height: '104px', borderRadius: '50%', background: 'linear-gradient(150deg,#241a3d,#1C1630)',
-            border: '1.5px solid #A78BFA', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 0 28px rgba(167,139,250,.45)', animation: 'ringPulse 1.6s ease-out infinite'
-          }}>
-            <Shield size={46} color="#A78BFA" />
-          </div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', letterSpacing: '.12em', color: '#A78BFA', textTransform: 'uppercase', marginTop: '18px' }}>
-            Odznak Doer odemčen
-          </div>
-          <div style={{
-            fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '52px', color: '#4AA8FF',
-            textShadow: '0 0 20px rgba(74,168,255,.7), 0 0 40px rgba(59,130,246,.4)', marginTop: '6px'
-          }}>
-            +10 XP
-          </div>
-        </div>
       </Card>
     );
   } else if (step === 'reward2') {

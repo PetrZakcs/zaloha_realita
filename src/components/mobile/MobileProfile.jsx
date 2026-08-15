@@ -1,16 +1,44 @@
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
-import { Settings as SettingsIcon, Shield, Flame, Leaf, Zap, Lock, Sparkles, ChevronRight } from 'lucide-react';
+import { supabase } from '../../api/supabaseClient';
+import { ALL_CARDS, isCardUnlocked } from '../../lib/cards';
+import { getAvatarLevel } from '../../lib/avatarLevels';
+import { Settings as SettingsIcon, Crown, ChevronRight, Package } from 'lucide-react';
 import HraPassCard from '../common/HraPassCard';
 
 export default function MobileProfile() {
-  const { user, openModal } = useUserStore();
+  const { user, openModal, unlockedCards, loadUnlockedCards } = useUserStore();
+  const navigate = useNavigate();
+  const [proofs, setProofs] = useState([]);
 
-  const mockBadges = [
-    { icon: <Shield size={24} />, rarity: 'rare', border: '#7C3AED', color: '#A78BFA', shadow: 'rgba(124,58,237,.3)' },
-    { icon: <Flame size={24} />, rarity: 'legendary', border: '#F5B73F', color: '#F5B73F', shadow: 'rgba(245,183,63,.45)' },
-    { icon: <Leaf size={24} />, rarity: 'success', border: '#22C55E', color: '#22C55E', shadow: 'rgba(34,197,94,.3)' },
-    { icon: <Zap size={24} />, rarity: 'epic', border: '#4AA8FF', color: '#4AA8FF', shadow: 'rgba(74,168,255,.4)' }
-  ];
+  useEffect(() => {
+    if (unlockedCards.length === 0) loadUnlockedCards();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Own "poslední 3 veřejné proofy" (spec-10 §2C) — same shape/query as PublicProfile.jsx's
+  // version of this, just scoped to the logged-in user instead of a :userId param.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { data } = await supabase
+        .from('feed_posts')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .eq('is_public', true)
+        .order('created_at', { ascending: false })
+        .limit(3);
+      if (!cancelled) setProofs(data || []);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const level = getAvatarLevel(user?.badges_count);
+  const ownedCards = ALL_CARDS.filter(c => isCardUnlocked(c, unlockedCards));
+  const showcase = (user?.showcaseCardKeys || []).map(key => ALL_CARDS.find(c => c.key === key)).filter(Boolean);
 
   return (
     <div style={{
@@ -23,65 +51,67 @@ export default function MobileProfile() {
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {/* Profile Card Header */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '14px 24px 0', position: 'relative' }}>
-          <span 
+          <span
             onClick={() => openModal('settings')}
             style={{ position: 'absolute', right: '20px', top: '12px', display: 'inline-flex', width: '22px', height: '22px', color: '#6B6B8A', cursor: 'pointer' }}
           >
             <SettingsIcon size={20} />
           </span>
 
-          {/* Avatar with conic progress ring */}
-          <div style={{ position: 'relative', width: '96px', height: '96px', display: 'flex', alignItems: 'center', justifycontent: 'center', justifyContent: 'center' }}>
-            <svg viewBox="0 0 96 96" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', transform: 'rotate(-90deg)' }}>
-              <circle cx="48" cy="48" r="44" fill="none" stroke="#2A2142" strokeWidth="4"></circle>
-              <circle cx="48" cy="48" r="44" fill="none" stroke="#7C3AED" strokeWidth="4" strokeLinecap="round" strokeDasharray="276.5" strokeDashoffset="180"></circle>
-            </svg>
+          {/* Avatar — level-driven color/glow (spec-10 §6), not a fixed purple ring */}
+          <div style={{ position: 'relative', width: '96px', height: '96px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <span style={{
               width: '78px',
               height: '78px',
               borderRadius: '50%',
               background: '#241C3C',
-              border: '2px solid #7C3AED',
-              boxShadow: '0 0 18px rgba(124,58,237,.35)',
+              border: `${level.borderWidth}px solid ${level.border}`,
+              boxShadow: level.glow ? `0 0 ${level.glow}px ${level.border}88` : 'none',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontFamily: "'Space Grotesk', sans-serif",
               fontWeight: '700',
               fontSize: '26px',
-              color: '#A78BFA'
+              color: level.color
             }}>
               {(user?.name || 'TP').slice(0, 2).toUpperCase()}
             </span>
-            {/* Pinned Showcase Badge Pin */}
-            <span style={{
-              position: 'absolute',
-              bottom: '-2px',
-              right: '-2px',
-              width: '28px',
-              height: '28px',
-              borderRadius: '50%',
-              background: '#2A1E10',
-              border: '2px solid #F5B73F',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 0 10px rgba(245,183,63,.5)'
-            }}>
-              <span style={{ display: 'inline-flex', width: '13px', height: '13px', color: '#F5B73F' }}><Flame size={12} /></span>
-            </span>
+            {user?.passHolder && (
+              <span style={{
+                position: 'absolute',
+                bottom: '-2px',
+                right: '-2px',
+                width: '28px',
+                height: '28px',
+                borderRadius: '50%',
+                background: '#2A1E10',
+                border: '2px solid #F5B73F',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 10px rgba(245,183,63,.5)'
+              }}>
+                <span style={{ display: 'inline-flex', width: '13px', height: '13px', color: '#F5B73F' }}><Crown size={12} /></span>
+              </span>
+            )}
           </div>
 
           <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '20px', marginTop: '14px', color: '#F0F0F8' }}>
             {user?.name || 'TemnýPozorovatel'}
           </div>
-          
+
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
-            <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '11px', color: '#A78BFA', background: '#241C3C', border: '0.5px solid #7C3AED', borderRadius: '20px', padding: '4px 11px' }}>
-              {user?.rarity || 'Rare'}
+            <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '11px', color: level.color, background: '#241C3C', border: `0.5px solid ${level.border}`, borderRadius: '20px', padding: '4px 11px' }}>
+              {level.name}
             </span>
+            {user?.passHolder && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontFamily: 'Inter', fontWeight: '600', fontSize: '11px', color: '#F5B73F', background: '#2A1E10', border: '0.5px solid #F5B73F', borderRadius: '20px', padding: '4px 11px' }}>
+                <Crown size={11} /> Founder
+              </span>
+            )}
             <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: '#60A5FA' }}>
-              {user?.xp || 240} XP
+              {user?.xp || 0} XP
             </span>
           </div>
         </div>
@@ -95,31 +125,23 @@ export default function MobileProfile() {
           </div>
         </div>
 
-        {/* RPG Stats Grid (2 rows x 3 columns) */}
+        {/* Stats Grid */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '9px', padding: '16px 24px 0' }}>
           <div style={{ background: '#241C3C', border: '0.5px solid #382C5C', borderRadius: '16px', padding: '11px', textAlign: 'center' }}>
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', color: '#F5B73F' }}>{user?.keys_count || 7}</div>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', color: '#F5B73F' }}>{user?.keys_count ?? 0}</div>
             <div style={{ fontFamily: 'Inter', fontSize: '9px', color: '#6B6B8A', marginTop: '2px' }}>klíčů</div>
           </div>
           <div style={{ background: '#241C3C', border: '0.5px solid #382C5C', borderRadius: '16px', padding: '11px', textAlign: 'center' }}>
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', color: '#4AA8FF' }}>{user?.xp || 240}</div>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', color: '#4AA8FF' }}>{user?.xp ?? 0}</div>
             <div style={{ fontFamily: 'Inter', fontSize: '9px', color: '#6B6B8A', marginTop: '2px' }}>XP</div>
           </div>
           <div style={{ background: '#241C3C', border: '0.5px solid #382C5C', borderRadius: '16px', padding: '11px', textAlign: 'center' }}>
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', color: '#F5B73F' }}>{user?.streak || 5}</div>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', color: '#F5B73F' }}>{user?.streak ?? 0}</div>
             <div style={{ fontFamily: 'Inter', fontSize: '9px', color: '#6B6B8A', marginTop: '2px' }}>dní v řadě</div>
           </div>
-          <div style={{ background: '#241C3C', border: '0.5px solid #382C5C', borderRadius: '16px', padding: '11px', textAlign: 'center' }}>
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', color: '#22C55E' }}>12</div>
-            <div style={{ fontFamily: 'Inter', fontSize: '9px', color: '#6B6B8A', marginTop: '2px' }}>výzev</div>
-          </div>
-          <div style={{ background: '#241C3C', border: '0.5px solid #382C5C', borderRadius: '16px', padding: '11px', textAlign: 'center' }}>
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', color: '#A78BFA' }}>3</div>
-            <div style={{ fontFamily: 'Inter', fontSize: '9px', color: '#6B6B8A', marginTop: '2px' }}>artefakty</div>
-          </div>
-          <div style={{ background: '#241C3C', border: '0.5px solid #382C5C', borderRadius: '16px', padding: '11px', textAlign: 'center' }}>
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', color: '#22C55E' }}>12</div>
-            <div style={{ fontFamily: 'Inter', fontSize: '9px', color: '#6B6B8A', marginTop: '2px' }}>zásahy</div>
+          <div style={{ background: '#241C3C', border: '0.5px solid #382C5C', borderRadius: '16px', padding: '11px', textAlign: 'center', gridColumn: 'span 3' }}>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', color: '#22C55E' }}>Uzel {user?.uzel ?? 0}</div>
+            <div style={{ fontFamily: 'Inter', fontSize: '9px', color: '#6B6B8A', marginTop: '2px' }}>aktuální postup</div>
           </div>
         </div>
 
@@ -128,73 +150,61 @@ export default function MobileProfile() {
           <HraPassCard compact />
         </div>
 
-        {/* Badges Grid */}
+        {/* Showcase (spec-10 §2E) — the player's own curated selection, editable in Inventář */}
+        {showcase.length > 0 && (
+          <div style={{ padding: '20px 24px 0' }}>
+            <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#6B6B8A' }}>
+              Showcase
+            </span>
+            <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+              {showcase.map(card => (
+                <div key={card.key} style={{ flex: 1, aspectRatio: '1', background: card.bg, border: `1.5px solid ${card.border}`, borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px' }}>
+                  <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', color: card.color, textAlign: 'center' }}>{card.title}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Poslední proofy (spec-10 §2C) */}
+        {proofs.length > 0 && (
+          <div style={{ padding: '20px 24px 0' }}>
+            <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#6B6B8A' }}>
+              Poslední důkazy
+            </span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
+              {proofs.map(p => (
+                <div key={p.id} style={{ background: '#241C3C', border: '0.5px solid #382C5C', borderRadius: '14px', padding: '10px 13px' }}>
+                  <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F0F0F8', lineHeight: '1.5' }}>{p.content}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Mini collection teaser (spec-10 §2F) — 3 owned cards + progress, links to the
+            full Inventář. Replaces what used to be a 16-slot grid cycling through 4 fake
+            mock icon styles regardless of what was actually unlocked. */}
         <div style={{ padding: '20px 24px 0' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
             <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#6B6B8A' }}>
-              Odznaky
+              Sbírka
             </span>
             <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', color: '#A78BFA' }}>
-              {user?.badges_count || 4} / 16 · {Math.round(((user?.badges_count || 4) / 16) * 100)} %
+              {ownedCards.length} / {ALL_CARDS.length}
             </span>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
-            {/* Unlocked Badges */}
-            {[...Array(16)].map((_, i) => {
-              const unlocked = i < (user?.badges_count || 4);
-              if (unlocked) {
-                // Map style from mock list
-                const styleDef = mockBadges[i % mockBadges.length];
-                return (
-                  <div
-                    key={i}
-                    onClick={() => openModal('collections')}
-                    style={{
-                      aspectRatio: '1',
-                      background: styleDef.rarity === 'legendary' ? 'linear-gradient(150deg,#3a2a10,#241a3d)' : '#241a3d',
-                      border: `1.5px solid ${styleDef.border}`,
-                      borderRadius: '16px',
-                      boxShadow: `0 0 12px ${styleDef.shadow}`,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <span style={{ display: 'inline-flex', width: '24px', height: '24px', color: styleDef.color }}>
-                      {styleDef.icon}
-                    </span>
-                  </div>
-                );
-              } else {
-                return (
-                  <div
-                    key={i}
-                    onClick={() => openModal('collections')}
-                    style={{
-                      aspectRatio: '1',
-                      background: '#1A142C',
-                      border: '1.5px dashed #382C5C',
-                      borderRadius: '16px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <span style={{ display: 'inline-flex', width: '20px', height: '20px', color: '#3a3a55' }}>
-                      <Lock size={18} />
-                    </span>
-                  </div>
-                );
-              }
-            })}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+            {ownedCards.slice(0, 3).map(card => (
+              <div key={card.key} style={{ aspectRatio: '1', background: card.bg, border: `1.5px solid ${card.border}`, borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px' }}>
+                <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', color: card.color, textAlign: 'center' }}>{card.title}</span>
+              </div>
+            ))}
           </div>
 
-          {/* Collections Link */}
-          <div 
-            onClick={() => openModal('collections')}
+          <div
+            onClick={() => navigate('/inventory')}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -218,15 +228,17 @@ export default function MobileProfile() {
               justifyContent: 'center',
               flexShrink: 0
             }}>
-              <span style={{ display: 'inline-flex', width: '16px', height: '16px', color: '#A78BFA' }}><Sparkles size={16} /></span>
+              <span style={{ display: 'inline-flex', width: '16px', height: '16px', color: '#A78BFA' }}><Package size={16} /></span>
             </span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#F0F0F8' }}>Moje sbírky</div>
-              <div style={{ fontFamily: 'Inter', fontSize: '10px', color: '#6B6B8A', marginTop: '1px' }}>Odznaky, artefakty a rarity album</div>
+              <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#F0F0F8' }}>Otevřít Inventář</div>
+              <div style={{ fontFamily: 'Inter', fontSize: '10px', color: '#6B6B8A', marginTop: '1px' }}>Karty, showcase, postup a zdroje</div>
             </div>
             <span style={{ display: 'inline-flex', width: '16px', height: '16px', color: '#6B6B8A' }}><ChevronRight size={16} /></span>
           </div>
         </div>
+
+        <div style={{ height: '20px' }} />
       </div>
     </div>
   );

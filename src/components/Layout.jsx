@@ -20,7 +20,7 @@ import PwaInstallBanner from './layout/PwaInstallBanner';
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, onboarded, activeModal, openModal, addReaction } = useUserStore();
+  const { user, onboarded, openModal, addReaction } = useUserStore();
   const isMobile = useIsMobile();
 
   // Redirect to Splash if not onboarded
@@ -31,12 +31,12 @@ export default function Layout() {
   const nav = [
     { id: 'home', icon: <HomeIcon size={20} />, label: 'Domů', path: '/' },
     { id: 'feed', icon: <LayoutGrid size={20} />, label: 'Feed', path: '/feed' },
-    { id: 'artefakty', icon: <Sparkles size={20} />, label: 'Artefakty', action: () => openModal('collections') },
+    { id: 'artefakty', icon: <Sparkles size={20} />, label: 'Artefakty', path: '/inventory' },
     { id: 'leaderboard', icon: <Trophy size={20} />, label: 'Žebříček', path: '/leaderboard' },
     { id: 'profile', icon: <UserIcon size={20} />, label: 'Profil', path: '/profile' },
   ];
 
-  const isNavItemActive = (item) => item.path ? location.pathname === item.path : item.id === 'artefakty' && activeModal === 'collections';
+  const isNavItemActive = (item) => item.path ? location.pathname === item.path : false;
 
   // Helper to resolve desktop header title based on route
   const getDesktopTitle = () => {

@@ -43,7 +43,7 @@ export default function EmailAuthForm({ radius = 16 }) {
       return;
     }
     // Otherwise: registerWithEmail already advanced onboardingStep to
-    // 'intro' itself, or loginWithEmail's success will resolve into
+    // 'avatar-upgrade' itself, or loginWithEmail's success will resolve into
     // onboarded:true asynchronously via App.jsx's auth listener — nothing
     // further to do here in either case.
   };

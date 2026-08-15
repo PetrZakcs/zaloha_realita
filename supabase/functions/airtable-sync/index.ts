@@ -34,8 +34,18 @@ serve(async (req) => {
       );
     }
 
-    // Prepare Airtable insert request
-    // Junction table links cards to users via linked records (arrays)
+    // Verified against the real base schema (read-only Airtable Meta API check, 2026-08-14):
+    // owned_cards has NO Linked Record fields at all — discord_id/card_id/obtained_at/
+    // obtained_via are all plain single-line text. The previous version of this function
+    // sent fields named "users"/"cards" as Linked Record arrays, which don't exist on this
+    // table under any name — every sync call would have failed on Airtable's side (422,
+    // unknown field) even once deployed and even with discord_user_id populated correctly.
+    //
+    // OPEN QUESTION, not resolved by this fix: whether `cardKey` (this app's internal id —
+    // 'doer-mvp1', 'c-node-1-card', etc., see src/lib/cards.js) is the same id scheme the
+    // `cards` table (which also backs the hrareality.cz collection page) expects in its own
+    // card_id field. If not, rows land in owned_cards fine, but won't visibly line up with
+    // anything in the cards catalog on the website. Needs a real answer, not a guess.
     const response = await fetch(
       `https://api.airtable.com/v0/${airtableBaseId}/${tableName}`,
       {
@@ -48,9 +58,10 @@ serve(async (req) => {
           records: [
             {
               fields: {
-                users: [discordUserId], // Linked Record array to registered users table
-                cards: [cardKey], // Linked Record array to cards catalog
-                obtained_at: new Date().toISOString()
+                discord_id: discordUserId,
+                card_id: cardKey,
+                obtained_at: new Date().toISOString(),
+                obtained_via: "hra_reality_app"
               }
             }
           ]

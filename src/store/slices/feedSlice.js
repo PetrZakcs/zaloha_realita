@@ -1,10 +1,12 @@
 import { supabase } from '../../api/supabaseClient';
+import { track } from '../../lib/analytics';
 
 export const DEFAULT_FEED = [
   {
     id: 'f1',
     user_name: 'NeonLiška',
     rarity: 'Rare',
+    type: 'PROOF',
     content: 'Sebrala 3 kelímky 🟢',
     reactions_fire: 34,
     reactions_lightning: 12,
@@ -16,6 +18,7 @@ export const DEFAULT_FEED = [
     id: 'f2',
     user_name: 'RychlýDoer',
     rarity: 'Rare',
+    type: 'PROOF',
     content: 'Napsal kámošce po půl roce',
     reactions_fire: 21,
     reactions_lightning: 5,
@@ -27,6 +30,9 @@ export const DEFAULT_FEED = [
     id: 'f3',
     user_name: 'Kometa',
     rarity: 'Legendary',
+    // Demo variety only — real STATUS posts come from server-side triggers
+    // (submit_season_reflection(), handle_referral_signup(), stripe-webhook).
+    type: 'STATUS',
     content: 'Dokončil jsem celou Season 0 a sejmul bossa! 👑',
     reactions_fire: 120,
     reactions_lightning: 44,
@@ -59,8 +65,11 @@ export const createFeedSlice = (set, get) => {
           if (payload.eventType === 'INSERT') {
             const newItem = {
               id: payload.new.id,
+              user_id: payload.new.user_id || null,
               user_name: payload.new.user_name || 'Hráč',
               rarity: 'Rare',
+              type: payload.new.type || 'PROOF',
+              author_pass_holder: !!payload.new.author_pass_holder,
               content: payload.new.content,
               image_url: payload.new.image_url || null,
               reactions_fire: payload.new.reactions_fire || 0,
@@ -119,8 +128,11 @@ export const createFeedSlice = (set, get) => {
         if (!error && data && data.length > 0) {
           const mappedPosts = data.map(p => ({
             id: p.id,
+            user_id: p.user_id || null,
             user_name: p.user_name || 'Doer',
             rarity: 'Rare',
+            type: p.type || 'PROOF',
+            author_pass_holder: !!p.author_pass_holder,
             content: p.content,
             image_url: p.image_url || null,
             reactions_fire: p.reactions_fire || 0,
@@ -159,6 +171,11 @@ export const createFeedSlice = (set, get) => {
     },
 
     addReaction: async (postId, type) => {
+      // spec-11 "FEED & SOCIAL" KPI: reaction count / % hráčů co reagují — previously
+      // completely untracked, only inferable indirectly from the reactions_* columns
+      // themselves (which don't say WHO reacted or WHEN, just a running total).
+      track('reaction_added', { post_id: postId, reaction_type: type });
+
       set(state => ({
         feed: state.feed.map(item => {
           if (item.id === postId) {

@@ -1,3 +1,8 @@
+-- SUPERSEDED for protect_profile_privileges() and complete_challenge() — see
+-- supabase_migration_consolidated_functions.sql, now the single source of truth for both.
+-- The rest of this file (RLS policies, check_is_admin(), profiles_public view groundwork)
+-- is still the real, one-time source for those — only the two function bodies are stale here.
+--
 -- iWAU / Hra Reality — Close profiles privilege-escalation, XP-farming, and PII-leak holes
 -- Run this once in the Supabase SQL Editor. Safe to re-run (idempotent).
 --
@@ -141,7 +146,6 @@ DECLARE
   v_user_name      text;
   v_reward_xp      int;
   v_reward_keys    int;
-  v_bonus_keys     int := 0;
   v_current_badges int;
   v_new_badges     int;
   v_new_xp         int;
@@ -160,8 +164,13 @@ BEGIN
     RAISE EXCEPTION 'Unknown challenge_id: %', p_challenge_id USING ERRCODE = 'P0002';
   END IF;
 
-  IF p_is_public THEN
-    v_bonus_keys := 1;
+  -- MVP1 spec (Feed §7, "Veřejný vs soukromý proof"): a private proof still grants
+  -- XP/progress but must grant ZERO keys — only a public proof earns the challenge's
+  -- key reward. Previously v_reward_keys was granted unconditionally regardless of
+  -- p_is_public (with only a separate flat +1 "bonus" gated on it), so a private proof
+  -- was still farming the challenge's full base key reward. Zero it out instead.
+  IF NOT p_is_public THEN
+    v_reward_keys := 0;
   END IF;
 
   -- Anti-duplicate-farming guard runs FIRST, in the same transaction as the reward
@@ -188,7 +197,7 @@ BEGIN
 
   UPDATE public.profiles
   SET xp = xp + v_reward_xp,
-      keys_balance = keys_balance + v_reward_keys + v_bonus_keys,
+      keys_balance = keys_balance + v_reward_keys,
       avatar_level = v_new_badges
   WHERE id = v_user_id
   RETURNING xp, keys_balance, avatar_level INTO v_new_xp, v_new_keys, v_new_badges;
@@ -196,7 +205,7 @@ BEGIN
   INSERT INTO public.key_transactions (user_id, amount, source, balance_after)
   VALUES (
     v_user_id,
-    v_reward_keys + v_bonus_keys,
+    v_reward_keys,
     CASE WHEN p_is_public THEN 'PROOF_PUBLIC' ELSE 'CHALLENGE_COMPLETE' END,
     v_new_keys
   );
@@ -229,11 +238,42 @@ DROP POLICY IF EXISTS "Allow users to read their own profile" ON public.profiles
 CREATE POLICY "Allow users to read their own profile" ON public.profiles
   FOR SELECT USING (auth.uid() = id);
 
+-- IMPORTANT: The naive approach of writing
+--   EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_admin = true)
+-- directly inside a policy ON public.profiles causes PostgreSQL error 42P17
+-- ("infinite recursion detected in policy for relation 'profiles'") because
+-- evaluating the policy triggers another policy check on the same table,
+-- which triggers another policy check, ad infinitum.
+--
+-- Fix: use a SECURITY DEFINER function that reads profiles as its owner
+-- (bypassing RLS for that internal SELECT) so the recursion is broken.
+CREATE OR REPLACE FUNCTION public.check_is_admin(user_id uuid)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_is_admin boolean;
+BEGIN
+  SELECT is_admin INTO v_is_admin
+  FROM public.profiles
+  WHERE id = user_id;
+  RETURN COALESCE(v_is_admin, false);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.check_is_admin(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.check_is_admin(uuid) TO authenticated;
+
 DROP POLICY IF EXISTS "Allow admins to read all profiles" ON public.profiles;
 CREATE POLICY "Allow admins to read all profiles" ON public.profiles
-  FOR SELECT USING (
-    EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.is_admin = true)
-  );
+  FOR SELECT USING (public.check_is_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "Allow admins to update any profile" ON public.profiles;
+CREATE POLICY "Allow admins to update any profile" ON public.profiles
+  FOR UPDATE USING (public.check_is_admin(auth.uid()))
+  WITH CHECK (public.check_is_admin(auth.uid()));
 
 -- Public-safe subset for leaderboard/other-user display. Deliberately created without
 -- security_invoker, so it runs with the view owner's privileges (the table owner bypasses

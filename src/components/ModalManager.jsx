@@ -1,20 +1,27 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import { supabase } from '../api/supabaseClient';
 import { track } from '../lib/analytics';
-import { 
-  X, Check, KeyRound, Lock, Crown, ArrowRight, Shield, Zap, 
-  ImageIcon, Globe, Bell, Sparkles, Loader2, Volume2
+import { buildReferralLink, shareContent } from '../lib/share';
+import { ALL_CARDS, isCardUnlocked } from '../lib/cards';
+import { getPushStatus, subscribeToPush, unsubscribeFromPush } from '../lib/push';
+import {
+  X, Check, KeyRound, Lock, Crown, ArrowRight, Shield, Zap,
+  ImageIcon, Globe, Bell, Sparkles, Loader2, Volume2, Clock, Share2, Users, Sunrise
 } from 'lucide-react';
 import OnboardingFlow from './modals/OnboardingFlow';
+import SeasonReflectionFlow from './modals/SeasonReflectionFlow';
 
 export default function ModalManager() {
-  const { 
-    user, 
+  const navigate = useNavigate();
+  const {
+    user,
     onboarded,
     sessionChecked,
-    activeModal, 
+    activeModal,
     activeChallenge,
+    activeStoryNode,
     closeModal,
     openModal,
     updateUser,
@@ -23,7 +30,11 @@ export default function ModalManager() {
     resetProgress,
     unlockedCards,
     proofsSubmittedCount,
-    advanceNode
+    advanceNode,
+    referralSignupsCount,
+    fetchReferralStats,
+    changeDisplayNameOnce,
+    welcomeBackDays
   } = useUserStore();
 
   // Onboarding text states
@@ -34,6 +45,9 @@ export default function ModalManager() {
   const [proofMode, setProofMode] = useState('photo'); // 'photo' | 'text'
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState(null);
+  const [referralShareState, setReferralShareState] = useState('idle'); // 'idle' | 'copied'
+  const [pushStatus, setPushStatus] = useState('not-subscribed'); // see src/lib/push.js getPushStatus()
+  const [pushBusy, setPushBusy] = useState(false);
 
   // Sync temp name when user store updates
   useEffect(() => {
@@ -61,6 +75,36 @@ export default function ModalManager() {
       return () => clearInterval(timer);
     }
   }, [activeModal, user?.xp]);
+
+  // Referral count/link is shown in both the paywall's earn-to-unlock CTA and Settings —
+  // refresh it whenever either opens instead of only once at login, so a milestone reward
+  // granted in another tab/session shows up without a full app reload.
+  useEffect(() => {
+    if (activeModal === 'paywall' || activeModal === 'settings') {
+      setReferralShareState('idle');
+      fetchReferralStats();
+    }
+    if (activeModal === 'settings') {
+      getPushStatus().then(setPushStatus);
+    }
+  }, [activeModal]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (activeModal === 'welcome-back') {
+      track('welcome_back_shown', { days: welcomeBackDays });
+    }
+  }, [activeModal]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // spec-11 "CORE GAME" KPI: challenge start/view funnel — previously untracked, so there
+  // was no way to compute "kolik výzev bylo spuštěno" or a start->proof completion ratio.
+  useEffect(() => {
+    if (activeModal === 'challenge-detail') {
+      track('challenge_viewed', { node: user?.uzel, challenge_id: activeChallenge?.id });
+    }
+    if (activeModal === 'proof-upload') {
+      track('challenge_started', { node: user?.uzel, challenge_id: activeChallenge?.id });
+    }
+  }, [activeModal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset the proof form each time the upload modal is (re)opened
   useEffect(() => {
@@ -401,7 +445,7 @@ export default function ModalManager() {
                   cursor: 'pointer'
                 }}
               >
-                <Globe size={13} /> Veřejný (+1 klíč)
+                <Globe size={13} /> Veřejný (+{activeChallenge?.reward_keys ?? 1} {activeChallenge?.reward_keys === 1 ? 'klíč' : 'klíče'})
               </button>
               <button 
                 onClick={() => setPublicToggle(false)}
@@ -422,7 +466,7 @@ export default function ModalManager() {
                   cursor: 'pointer'
                 }}
               >
-                <Lock size={13} /> Soukromý
+                <Lock size={13} /> Soukromý (0 klíčů)
               </button>
             </div>
 
@@ -871,11 +915,238 @@ export default function ModalManager() {
               Aktivovat HRA PASS
             </button>
 
+            {/* MVP1 spec soft-paywall: declining the Pass doesn't dead-end a free player —
+                they can still take 1 story node/day (supabase_migration_free_daily_node.sql).
+                Secondary, deliberately less prominent than the purchase CTA above. */}
+            <button
+              onClick={() => {
+                track('paywall_declined_free_daily', { node: user?.uzel });
+                closeModal();
+                advanceNode(true);
+              }}
+              style={{
+                width: '100%',
+                height: '40px',
+                background: 'transparent',
+                color: '#9A9AB5',
+                fontFamily: 'Inter',
+                fontWeight: '600',
+                fontSize: '13px',
+                border: '1px solid #382C5C',
+                borderRadius: '14px',
+                cursor: 'pointer',
+                marginTop: '10px'
+              }}
+            >
+              Pokračovat zdarma (1 uzel denně)
+            </button>
+
+            {/* Earn-to-unlock (spec-4/spec-9): "Odemknout zdarma — přiveď 2 hráče". A
+                supplement to the Pass, never a replacement — see
+                supabase_migration_referral_system.sql for the exact reward (one stored
+                pass-gate skip at 2 referred signups, consumed by advance_node()). */}
+            <div style={{
+              background: '#1C1630',
+              border: '1px dashed #382C5C',
+              borderRadius: '16px',
+              padding: '14px',
+              marginTop: '10px',
+              textAlign: 'left'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#A78BFA' }}>
+                <Users size={14} />
+                <span style={{ fontFamily: 'Inter', fontWeight: '700', fontSize: '12px' }}>Nebo odemkni zdarma — přiveď 2 hráče</span>
+              </div>
+              <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#9A9AB5', marginTop: '4px' }}>
+                {referralSignupsCount === null ? 'Načítám…' : `${Math.min(referralSignupsCount, 2)}/2 hráčů — druhý ti hned odemkne další uzel.`}
+              </div>
+              <button
+                onClick={async () => {
+                  track('referral_link_shared', { source: 'paywall' });
+                  const result = await shareContent({
+                    title: 'Hra Reality',
+                    text: `${user?.name || 'Hráč'} tě zve do Hry Reality. Pojď hrát se mnou:`,
+                    url: buildReferralLink(user?.referralCode)
+                  });
+                  if (result.shared) {
+                    track('referral_link_share_completed', { source: 'paywall', method: result.method });
+                    if (result.method === 'clipboard') setReferralShareState('copied');
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  height: '36px',
+                  background: 'transparent',
+                  color: '#A78BFA',
+                  fontFamily: 'Inter',
+                  fontWeight: '600',
+                  fontSize: '12px',
+                  border: '1px solid #382C5C',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  marginTop: '10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px'
+                }}
+              >
+                {referralShareState === 'copied' ? <>Odkaz zkopírován <Check size={14} /></> : <>Sdílet zvací odkaz <Share2 size={14} /></>}
+              </button>
+            </div>
+
             <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', textAlign: 'center', marginTop: '10px', lineHeight: '1.5' }}>
               Nákupem souhlasíš s <a href="/terms" style={{ color: '#9A9AB5', textDecoration: 'underline' }}>Obchodními podmínkami</a> a <a href="/privacy" style={{ color: '#9A9AB5', textDecoration: 'underline' }}>Zásadami ochrany osobních údajů</a>.
             </div>
           </div>
         )}
+
+        {/* MODAL: Daily free-node limit reached (soft-gate, see advanceNode() / spec-8 §"Zamčený uzel") */}
+        {activeModal === 'node-daily-limit' && (
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '14px' }}>
+              <span style={{
+                width: '54px',
+                height: '54px',
+                borderRadius: '50%',
+                background: '#1C1630',
+                border: '2px solid #382C5C',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                <Clock size={26} style={{ color: '#9A9AB5' }} />
+              </span>
+            </div>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '20px', color: '#fff' }}>
+              Dnešní uzel je vyčerpán
+            </div>
+            <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', marginTop: '8px', lineHeight: '1.5' }}>
+              Bez Passu můžeš postoupit jen o 1 uzel denně. Tvůj progres čeká — vrať se zítra, nebo pokračuj hned bez čekání s Founder Passem.
+            </div>
+
+            <button
+              onClick={() => { track('paywall_opened', { source: 'node_daily_limit' }); openModal('paywall'); }}
+              style={{
+                width: '100%',
+                height: '48px',
+                background: '#F5B73F',
+                color: '#2A1E10',
+                fontFamily: 'Inter',
+                fontWeight: '700',
+                fontSize: '15px',
+                border: 'none',
+                borderRadius: '16px',
+                cursor: 'pointer',
+                marginTop: '20px'
+              }}
+            >
+              Odemknout Hra Pass
+            </button>
+
+            <button
+              onClick={closeModal}
+              style={{
+                width: '100%',
+                height: '40px',
+                background: 'transparent',
+                color: '#6B6B8A',
+                fontFamily: 'Inter',
+                fontWeight: '600',
+                fontSize: '13px',
+                border: 'none',
+                cursor: 'pointer',
+                marginTop: '8px'
+              }}
+            >
+              Zavřít
+            </button>
+          </div>
+        )}
+
+        {/* MODAL: Welcome back — D1 hook (spec-3 §14C) / 48h+ retention (spec-8 §7). Same
+            underlying moment (a return session after a day-boundary gap, see fetchUser()),
+            different copy by how many days it's been. No push/email infra behind this —
+            it only fires because the player already opened the app; that's the ceiling of
+            what's possible without notification permissions + a scheduled sender. */}
+        {activeModal === 'welcome-back' && (() => {
+          const isD1 = welcomeBackDays === 1;
+          return (
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '14px' }}>
+                <span style={{
+                  width: '54px',
+                  height: '54px',
+                  borderRadius: '50%',
+                  background: isD1 ? '#1C2E24' : '#1C1630',
+                  border: `2px solid ${isD1 ? '#22C55E' : '#382C5C'}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Sunrise size={26} style={{ color: isD1 ? '#22C55E' : '#9A9AB5' }} />
+                </span>
+              </div>
+
+              <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', color: '#fff' }}>
+                {isD1 ? 'Nový den' : 'Tvůj progres čeká'}
+              </div>
+
+              <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', marginTop: '8px', lineHeight: '1.5' }}>
+                {isD1
+                  ? (activeStoryNode ? `Uzel „${activeStoryNode.title}" je připraven. Jsi připraven/a pokračovat?` : 'Další uzel je odemčen. Jsi připraven/a pokračovat?')
+                  : (user?.passHolder
+                      ? 'Founder hráči pokračují bez omezení — vrať se do hry.'
+                      : 'Founder hráči mají plný přístup bez čekání.')}
+              </div>
+
+              <button
+                onClick={() => { track('welcome_back_continue', { days: welcomeBackDays }); closeModal(); navigate('/story'); }}
+                style={{
+                  width: '100%',
+                  height: '48px',
+                  background: '#7C3AED',
+                  color: '#fff',
+                  fontFamily: 'Inter',
+                  fontWeight: '700',
+                  fontSize: '15px',
+                  border: 'none',
+                  borderRadius: '16px',
+                  cursor: 'pointer',
+                  marginTop: '18px'
+                }}
+              >
+                Pokračovat
+              </button>
+
+              {!isD1 && !user?.passHolder && (
+                <button
+                  onClick={() => { track('welcome_back_paywall_opened', { days: welcomeBackDays }); openModal('paywall'); }}
+                  style={{
+                    width: '100%',
+                    height: '40px',
+                    background: 'transparent',
+                    color: '#F5B73F',
+                    fontFamily: 'Inter',
+                    fontWeight: '600',
+                    fontSize: '13px',
+                    border: '1px solid #F5B73F',
+                    borderRadius: '14px',
+                    cursor: 'pointer',
+                    marginTop: '10px'
+                  }}
+                >
+                  Odemknout Hra Pass
+                </button>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* MODAL: Referenční uzel — season-close reflection flow (spec-5). See
+            components/modals/SeasonReflectionFlow.jsx for the 8-step flow itself; this
+            just hosts it inside the same modal chrome/backdrop as everything else here. */}
+        {activeModal === 'season-reflection' && <SeasonReflectionFlow />}
 
         {/* MODAL 9: Settings */}
         {activeModal === 'settings' && (
@@ -887,9 +1158,9 @@ export default function ModalManager() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div>
                 <label style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', textTransform: 'uppercase' }}>Přezdívka</label>
-                <input 
-                  type="text" 
-                  value={tempName} 
+                <input
+                  type="text"
+                  value={tempName}
                   onChange={(e) => setTempName(e.target.value)}
                   style={{
                     width: '100%',
@@ -906,6 +1177,14 @@ export default function ModalManager() {
                     boxSizing: 'border-box'
                   }}
                 />
+                {/* spec-10 §3: 1 free rename ever, enforced server-side (changeDisplayNameOnce()
+                    / protect_profile_privileges()) — this is just an honest heads-up, not the
+                    actual gate, so it can't be bypassed by editing the DOM. */}
+                {user?.displayNameChangeUsed && (
+                  <div style={{ fontFamily: 'Inter', fontSize: '10px', color: '#6B6B8A', marginTop: '4px' }}>
+                    Bezplatnou změnu jména jsi už využil/a.
+                  </div>
+                )}
               </div>
 
               <div style={{ marginTop: '6px' }}>
@@ -932,9 +1211,132 @@ export default function ModalManager() {
               </div>
             </div>
 
-            <button 
-              onClick={() => {
-                updateUser({ name: tempName, pledge: tempPledge });
+            {/* Oznámení (spec-3 §14A Web Push retention) — subscribe/unsubscribe only; the
+                actual sending is a scheduled server-side job (send-retention-push), this
+                just controls whether this device/browser is on the recipient list. */}
+            {pushStatus !== 'unsupported' && (
+              <div style={{
+                background: '#1C1630',
+                border: '0.5px solid #382C5C',
+                borderRadius: '14px',
+                padding: '12px',
+                marginTop: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px'
+              }}>
+                <span style={{ display: 'inline-flex', width: '16px', height: '16px', color: '#A78BFA', flexShrink: 0 }}><Bell size={16} /></span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: 'Inter', fontWeight: '700', fontSize: '12px', color: '#F0F0F8' }}>Oznámení</div>
+                  <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#9A9AB5', marginTop: '2px' }}>
+                    {pushStatus === 'denied' ? 'Zakázáno v prohlížeči' : pushStatus === 'subscribed' ? 'Zapnuto na tomto zařízení' : 'Připomeneme, když se progres zastaví'}
+                  </div>
+                </div>
+                <button
+                  disabled={pushBusy || pushStatus === 'denied'}
+                  onClick={async () => {
+                    setPushBusy(true);
+                    if (pushStatus === 'subscribed') {
+                      await unsubscribeFromPush();
+                      track('push_unsubscribed');
+                      setPushStatus('not-subscribed');
+                    } else {
+                      const result = await subscribeToPush();
+                      track(result.success ? 'push_subscribed' : 'push_subscribe_failed', { error: result.error });
+                      setPushStatus(await getPushStatus());
+                      if (!result.success && result.error) alert(result.error);
+                    }
+                    setPushBusy(false);
+                  }}
+                  style={{
+                    height: '30px',
+                    padding: '0 14px',
+                    background: pushStatus === 'subscribed' ? 'transparent' : '#7C3AED',
+                    color: pushStatus === 'subscribed' ? '#9A9AB5' : '#fff',
+                    fontFamily: 'Inter',
+                    fontWeight: '600',
+                    fontSize: '11px',
+                    border: pushStatus === 'subscribed' ? '1px solid #382C5C' : 'none',
+                    borderRadius: '10px',
+                    cursor: pushStatus === 'denied' ? 'not-allowed' : 'pointer',
+                    opacity: pushBusy ? 0.6 : 1,
+                    flexShrink: 0
+                  }}
+                >
+                  {pushStatus === 'subscribed' ? 'Vypnout' : 'Zapnout'}
+                </button>
+              </div>
+            )}
+
+            {/* Pozvi přátele (spec-7 referral) — same link/reward mechanism as the paywall's
+                earn-to-unlock CTA, surfaced here too since not everyone hits a locked node
+                before they'd want to invite someone. */}
+            <div style={{
+              background: '#1C1630',
+              border: '0.5px solid #382C5C',
+              borderRadius: '14px',
+              padding: '12px',
+              marginTop: '14px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#A78BFA' }}>
+                <Users size={14} />
+                <span style={{ fontFamily: 'Inter', fontWeight: '700', fontSize: '12px' }}>Pozvi přátele</span>
+              </div>
+              <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#9A9AB5', marginTop: '4px' }}>
+                {referralSignupsCount === null
+                  ? 'Načítám…'
+                  : `${referralSignupsCount} pozvaných · 1. = +1 klíč, 2. = odemkni uzel zdarma, 3. = vzácná karta, 5. = odznak`}
+              </div>
+              <button
+                onClick={async () => {
+                  track('referral_link_shared', { source: 'settings' });
+                  const result = await shareContent({
+                    title: 'Hra Reality',
+                    text: `${user?.name || 'Hráč'} tě zve do Hry Reality. Pojď hrát se mnou:`,
+                    url: buildReferralLink(user?.referralCode)
+                  });
+                  if (result.shared) {
+                    track('referral_link_share_completed', { source: 'settings', method: result.method });
+                    if (result.method === 'clipboard') setReferralShareState('copied');
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  height: '36px',
+                  background: 'transparent',
+                  color: '#A78BFA',
+                  fontFamily: 'Inter',
+                  fontWeight: '600',
+                  fontSize: '12px',
+                  border: '1px solid #382C5C',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  marginTop: '10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px'
+                }}
+              >
+                {referralShareState === 'copied' ? <>Odkaz zkopírován <Check size={14} /></> : <>Sdílet zvací odkaz <Share2 size={14} /></>}
+              </button>
+            </div>
+
+            <button
+              onClick={async () => {
+                if (tempPledge !== user?.pledge) {
+                  updateUser({ pledge: tempPledge });
+                }
+
+                const nameChanged = tempName.trim() && tempName.trim() !== user?.name;
+                if (nameChanged) {
+                  const result = await changeDisplayNameOnce(tempName.trim());
+                  if (!result.success) {
+                    alert(result.error || 'Změnu jména se nepodařilo uložit.');
+                    return;
+                  }
+                }
+
                 alert('Profil byl uložen.');
                 closeModal();
               }}
@@ -1038,19 +1440,8 @@ export default function ModalManager() {
 
         {/* MODAL 11: Collections / Sbírky */}
         {activeModal === 'collections' && (() => {
-          const ALL_CARDS = [
-            { key: 'doer-mvp1', title: 'Doer', bg: '#241a3d', border: '#7C3AED', color: '#A78BFA' },
-            { key: 'c-node-1-card', title: 'Ticho', bg: '#2A1E10', border: '#F5B73F', color: '#F5B73F' },
-            { key: 'c-node-2-card', title: 'Detox', bg: '#1C2E24', border: '#22C55E', color: '#22C55E' },
-            { key: 'c-npc-challenge-card', title: 'NPC Hero', bg: '#14223D', border: '#4AA8FF', color: '#4AA8FF' },
-            { key: 'c-node-4-card', title: 'Strom', bg: '#241a3d', border: '#7C3AED', color: '#A78BFA' },
-            { key: 'c-node-5-card', title: 'Kniha', bg: '#2A1E10', border: '#F5B73F', color: '#F5B73F' },
-            { key: 'c-node-6-card', title: 'Zpráva', bg: '#1C2E24', border: '#22C55E', color: '#22C55E' },
-            { key: 'c-node-7-card', title: 'Úsvit', bg: '#14223D', border: '#4AA8FF', color: '#4AA8FF' }
-          ];
-
-          const unlockedBadges = ALL_CARDS.filter(card => 
-            unlockedCards.some(uc => uc.card_key === card.key) || card.key === 'doer-mvp1'
+          const unlockedBadges = ALL_CARDS.filter(card =>
+            isCardUnlocked(card, unlockedCards)
           );
 
           return (
@@ -1071,7 +1462,7 @@ export default function ModalManager() {
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
                     {ALL_CARDS.map((card) => {
-                      const isUnlocked = unlockedCards.some(uc => uc.card_key === card.key) || card.key === 'doer-mvp1';
+                      const isUnlocked = isCardUnlocked(card, unlockedCards);
                       if (isUnlocked) {
                         return (
                           <div 

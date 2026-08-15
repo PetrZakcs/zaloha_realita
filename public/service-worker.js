@@ -45,3 +45,43 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
+// Web Push retention notifications (MVP1 spec-3 §14A) — the actual sending happens
+// server-side (supabase/functions/send-retention-push, on a pg_cron schedule); this is just
+// the browser-side half that turns a received push into a visible OS notification, and
+// routes a tap back into the app. See src/lib/push.js for the subscribe/unsubscribe flow.
+self.addEventListener('push', (event) => {
+  let data = { title: 'Hra Reality', body: '', url: '/' };
+  try {
+    if (event.data) data = { ...data, ...event.data.json() };
+  } catch (e) {
+    if (event.data) data.body = event.data.text();
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'Hra Reality', {
+      body: data.body || '',
+      icon: '/logo192.png',
+      badge: '/logo192.png',
+      data: { url: data.url || '/' }
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = (event.notification.data && event.notification.data.url) || '/';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      // Reuse an already-open tab if there is one, rather than always opening a new one.
+      for (const client of clientList) {
+        if (client.url.startsWith(self.location.origin) && 'focus' in client) {
+          if ('navigate' in client) client.navigate(targetUrl);
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+    })
+  );
+});

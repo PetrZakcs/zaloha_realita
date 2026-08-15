@@ -1,17 +1,59 @@
 import { supabase } from '../../api/supabaseClient';
 import { track } from '../../lib/analytics';
 
-// Ordered onboarding step sequences per platform, per the HANDOFF spec:
-// 01 splash (logo/claim + Google/Discord/email auth, all on one screen) ->
-// 02 intro (Zaya introduces herself + nickname, same screen) -> 03 slib
-// (personal pledge, published as the player's first proof) -> 04 reward1
-// (short auto-advancing badge+XP toast) -> 05 reward2 (full celebration +
-// optional Hra Pass upsell -> Dashboard). Desktop gets an extra 'install'
-// (PWA) step at the end, right before completeOnboarding() flips `onboarded`;
-// mobile keeps its existing separate post-onboarding install banner instead
-// (see PwaInstallBanner.jsx) and never uses 'install'.
-export const MOBILE_ONBOARDING_STEPS = ['splash', 'intro', 'slib', 'reward1', 'reward2'];
-export const DESKTOP_ONBOARDING_STEPS = ['splash', 'intro', 'slib', 'reward1', 'reward2', 'install'];
+// Ordered onboarding step sequences per platform — MVP1 spec-3 "CELÝ FLOW: LANDING ->
+// QUEST LOOP". The whole point of this sequence is that login comes AFTER a first taste of
+// the game, not before it:
+//   01 entry (hero + instinctive binary choice, no session yet) ->
+//   02 first-reward (local-only "SIGNÁL ZACHYCEN" +XP preview, no session yet, nothing
+//      persisted — there's no account to persist it to) ->
+//   03 login (Google/Discord/email auth, reframed as "save this moment" rather than a
+//      gate — this is the ONLY step that touches Supabase Auth) ->
+//   04 avatar-upgrade (short post-login beat, avatar visibly changes from Level 0 "NPC" to
+//      Level 1 "Pozorovatel" styling — see src/lib/avatarLevels.js) ->
+//   05 mystery-box (reveals the always-unlocked 'doer-mvp1' starter card, see src/lib/cards.js) ->
+//   06 slib (personal pledge, published as the player's first real proof — kept from the
+//      previous flow: MVP1 PRD §2.5/§6.2 wants this as onboarding's sub-60s micro-activation) ->
+//   07 reward2 (full celebration + optional Hra Pass upsell -> Dashboard).
+// Desktop gets an extra 'install' (PWA) step at the end, right before completeOnboarding()
+// flips `onboarded`; mobile keeps its existing separate post-onboarding install banner
+// instead (see PwaInstallBanner.jsx) and never uses 'install'.
+//
+// Deliberately no separate nickname-picking step — spec-3's login step is explicit that the
+// username is "auto generated (Pozorovatel_763), poté může později změnit ve svém profilu".
+// The player's one free rename (changeDisplayNameOnce(), see
+// supabase_migration_profile_showcase.sql) is now genuinely unused until they deliberately
+// visit Settings, instead of being silently spent by a mandatory onboarding field. The old
+// setNickname()/set_initial_nickname() RPC pair that used to back a nickname step has been
+// removed entirely (see supabase_migration_consolidated_functions.sql) rather than left
+// unused, per a since-confirmed cleanup pass.
+export const MOBILE_ONBOARDING_STEPS = ['entry', 'first-reward', 'login', 'avatar-upgrade', 'mystery-box', 'slib', 'reward2'];
+export const DESKTOP_ONBOARDING_STEPS = ['entry', 'first-reward', 'login', 'avatar-upgrade', 'mystery-box', 'slib', 'reward2', 'install'];
+
+// Discord's real user id (a "snowflake") is what airtable-sync actually needs — it's the
+// join key for the Airtable rewards sync (submitProof() in gameplaySlice.js only fires that
+// call when discord_user_id is set). Root-caused: this used to just be forwarded from
+// whatever local optimistic user object was lying around (always null — nothing ever set
+// it from a real session), so the Airtable sync silently never fired for ANY Discord
+// signup, deployed edge function or not. Supabase doesn't document one single field name
+// for the raw provider id across OAuth providers, so this tries the identities array
+// (identity_data carries the provider's own profile payload) before falling back to
+// user_metadata. NOT verified against a live Discord login in this environment — the
+// console.log below is there specifically so the first real Discord sign-in after this
+// change can confirm which field it actually landed in; adjust the priority if needed.
+function extractDiscordUserId(session) {
+  if (session.user.app_metadata?.provider !== 'discord') return null;
+  const discordIdentity = session.user.identities?.find(i => i.provider === 'discord');
+  const meta = session.user.user_metadata || {};
+  const id = discordIdentity?.identity_data?.provider_id
+    || discordIdentity?.identity_data?.sub
+    || discordIdentity?.identity_data?.id
+    || meta.provider_id
+    || meta.sub
+    || null;
+  console.log('[Auth] extractDiscordUserId:', { id, identity_data: discordIdentity?.identity_data, user_metadata: meta });
+  return id;
+}
 
 // Translates the handful of Supabase auth errors we actually expect to hit
 // into Czech, matching this app's all-Czech-copy convention. Anything
@@ -52,7 +94,11 @@ export const DEFAULT_USER = {
   passHolder: false,
   discord_user_id: null,
   isAdmin: false, // Security default; mapped from is_admin in Supabase profile
-  email: null
+  email: null,
+  referralCode: null, // mapped from profiles.referral_code, server-generated — see supabase_migration_referral_system.sql
+  freeNodeCredits: 0, // referral-earned pass-gate skips (2-invite reward); consumed by advance_node()
+  showcaseCardKeys: [], // up to 3 owned card keys the player chose to feature — see set_showcase()
+  displayNameChangeUsed: false // spec-10 §3: one free rename ever, enforced server-side
 };
 
 export const createAuthSlice = (set, get) => {
@@ -64,7 +110,7 @@ export const createAuthSlice = (set, get) => {
   } catch (e) {
     console.error('Failed parsing local user data', e);
   }
-  const localOnboardingStep = localStorage.getItem('onboardingStep') || 'splash';
+  const localOnboardingStep = localStorage.getItem('onboardingStep') || 'entry';
 
   return {
     onboarded: localOnboarded,
@@ -81,6 +127,11 @@ export const createAuthSlice = (set, get) => {
     // from localStorage there's nothing to wait for — skip the loading state.
     sessionChecked: localOnboarded,
 
+    // Set by fetchUser() when a returning session crosses a calendar-day boundary since
+    // last_active_at — drives the 'welcome-back' modal (D1 hook / 48h+ retention, spec-3
+    // §14C / spec-8 §7). null = no return session detected yet this load.
+    welcomeBackDays: null,
+
     setOnboardingStep: (step) => {
       set({ onboardingStep: step });
       localStorage.setItem('onboardingStep', step);
@@ -91,9 +142,9 @@ export const createAuthSlice = (set, get) => {
     nextOnboardingStep: (isMobile) => {
       const steps = isMobile ? MOBILE_ONBOARDING_STEPS : DESKTOP_ONBOARDING_STEPS;
       const idx = steps.indexOf(get().onboardingStep);
-      // Unrecognized/legacy/wrong-platform step value (e.g. 'splash' persisted
-      // from a mobile session, now being read on desktop) -> land on this
-      // platform's first step instead of the old silent no-op dead end.
+      // Unrecognized/legacy/wrong-platform step value (e.g. an old 'splash'/'intro'
+      // persisted from before the spec-3 rework, or a mobile step being read on desktop)
+      // -> land on this platform's first step instead of the old silent no-op dead end.
       const next = idx === -1 ? steps[0] : steps[Math.min(idx + 1, steps.length - 1)];
       get().setOnboardingStep(next);
     },
@@ -113,6 +164,28 @@ export const createAuthSlice = (set, get) => {
         }
       } catch (e) {
         console.warn('Failed to load user cards from Supabase.', e);
+      }
+    },
+
+    // spec-10 §2E "SHOWCASE SLOTY" — up to 3 owned cards a player picks to feature on their
+    // public profile. Ownership is validated server-side (set_showcase() RPC), not here —
+    // ALL_CARDS/isCardUnlocked already filters the picker UI to owned cards, but the RPC is
+    // the actual trust boundary.
+    setShowcase: async (cardKeys) => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return { success: false };
+        const { error } = await supabase.rpc('set_showcase', { p_card_keys: cardKeys });
+        if (error) throw error;
+
+        const u = get().user;
+        const updated = { ...(u || { ...DEFAULT_USER }), showcaseCardKeys: cardKeys };
+        set({ user: updated });
+        localStorage.setItem('user', JSON.stringify(updated));
+        return { success: true };
+      } catch (e) {
+        console.warn('set_showcase failed.', e);
+        return { success: false };
       }
     },
 
@@ -223,8 +296,8 @@ export const createAuthSlice = (set, get) => {
 
         const needsConfirmation = !data.session;
         if (!needsConfirmation) {
-          set({ user: newUser, onboardingStep: 'intro' });
-          localStorage.setItem('onboardingStep', 'intro');
+          set({ user: newUser, onboardingStep: 'avatar-upgrade' });
+          localStorage.setItem('onboardingStep', 'avatar-upgrade');
           get().loadCurrentNodeData();
           // Drive the actual profiles-row creation directly too, same reason
           // as loginWithEmail — don't leave it solely to the async listener.
@@ -247,7 +320,7 @@ export const createAuthSlice = (set, get) => {
 
     // Existing account via email/password. Deliberately does NOT force
     // onboardingStep (unlike login()/registerWithEmail above) — a naive
-    // forced 'nickname'/'intro' would flash that screen at a returning user.
+    // forced 'avatar-upgrade' would flash that screen at a returning user.
     // It DOES call handleOAuthSession itself with the session signInWithPassword
     // just handed back, rather than only waiting on App.jsx's onAuthStateChange
     // listener to eventually deliver the same session — that passive path is
@@ -267,6 +340,18 @@ export const createAuthSlice = (set, get) => {
         if (data?.session) {
           localStorage.setItem('userId', data.session.user.id);
           await get().handleOAuthSession(data.session);
+
+          // handleOAuthSession succeeded IFF it set onboarded: true.
+          // If it didn't (e.g. profile missing in DB, INSERT policy not set,
+          // or any other silent failure), give the user a visible error
+          // instead of leaving them stuck on splash with no feedback.
+          if (!get().onboarded) {
+            console.error('[Auth] loginWithEmail: handleOAuthSession completed but onboarded is still false. Check [Auth] logs above for the root cause.');
+            return {
+              success: false,
+              error: 'Profil se nepodařilo načíst. Zkontroluj konzoli (DevTools → Console) pro detaily nebo kontaktuj podporu.'
+            };
+          }
         }
         return { success: true };
       } catch (e) {
@@ -275,8 +360,47 @@ export const createAuthSlice = (set, get) => {
       }
     },
 
-    setNickname: (name) => {
-      get().updateUser({ name });
+    // Settings-driven rename, post-onboarding — capped at one free change ever, enforced
+    // server-side by protect_profile_privileges()'s display_name_change_used logic (a
+    // client-side check alone would be trivially bypassed). Returns success:false with an
+    // error message rather than silently no-op'ing so Settings can show *why* it didn't
+    // save instead of just reverting quietly on the next fetch.
+    changeDisplayNameOnce: async (name) => {
+      const trimmed = (name || '').trim();
+      if (!trimmed) return { success: false, error: 'Zadej přezdívku.' };
+
+      if (get().user?.displayNameChangeUsed) {
+        return { success: false, error: 'Změnu jména jsi už jednou využil/a.' };
+      }
+
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return { success: false, error: 'Nejsi přihlášen/a.' };
+
+        const { data, error } = await supabase
+          .from('profiles')
+          .update({ display_name: trimmed })
+          .eq('id', session.user.id)
+          .select('display_name, display_name_change_used')
+          .single();
+        if (error) throw error;
+
+        // The trigger silently reverts display_name (and leaves display_name_change_used
+        // as-is) if the free change was already spent by another tab/device in the
+        // meantime — the returned row tells us whether it actually took.
+        if (data.display_name !== trimmed) {
+          return { success: false, error: 'Změnu jména jsi už jednou využil/a.' };
+        }
+
+        const u = get().user;
+        const updated = { ...(u || { ...DEFAULT_USER }), name: data.display_name, displayNameChangeUsed: !!data.display_name_change_used };
+        set({ user: updated });
+        localStorage.setItem('user', JSON.stringify(updated));
+        return { success: true };
+      } catch (e) {
+        console.warn('changeDisplayNameOnce failed.', e);
+        return { success: false, error: 'Změnu jména se nepodařilo uložit.' };
+      }
     },
 
     setPledge: (pledge) => {
@@ -328,7 +452,7 @@ export const createAuthSlice = (set, get) => {
       localStorage.removeItem('user');
       localStorage.removeItem('onboarded');
       localStorage.removeItem('onboardingStep');
-      set({ user: null, onboarded: false, onboardingStep: 'splash', activeModal: null, activeStoryNode: null, activeStoryNodeSteps: [] });
+      set({ user: null, onboarded: false, onboardingStep: 'entry', activeModal: null, activeStoryNode: null, activeStoryNodeSteps: [] });
       try {
         await supabase.auth.signOut();
       } catch (e) {
@@ -361,6 +485,18 @@ export const createAuthSlice = (set, get) => {
               current_streak: calculatedStreak,
               last_active_at: new Date().toISOString()
             }).eq('id', userId);
+
+            // MVP1 spec-3 §14C "D1 hook uvnitř appky" / spec-8 §7 "Po 48h neaktivity" —
+            // both are the same underlying moment (a return session after a calendar-day
+            // gap), just different copy by how many days it's been. This whole block only
+            // runs once per day-boundary crossing (guarded by lastActiveStr !== todayStr
+            // above), so welcomeBackDays only ever gets set once per actual return, not on
+            // every reload within the same day. Calendar-day diff (not raw ms/24h) to match
+            // the streak logic above and avoid a near-midnight session miscounting by a day.
+            const daysSinceLastActive = Math.round((new Date(todayStr) - new Date(lastActiveStr)) / 86400000);
+            if (daysSinceLastActive >= 1 && !get().activeModal) {
+              set({ welcomeBackDays: daysSinceLastActive, activeModal: 'welcome-back' });
+            }
           }
 
           const mappedUser = {
@@ -375,7 +511,11 @@ export const createAuthSlice = (set, get) => {
             passHolder: data.pass_holder || false,
             discord_user_id: data.discord_user_id || null,
             isAdmin: data.is_admin || false,
-            email: data.email || null
+            email: data.email || null,
+            referralCode: data.referral_code || null,
+            freeNodeCredits: data.free_node_credits || 0,
+            showcaseCardKeys: data.showcase_card_keys || [],
+            displayNameChangeUsed: !!data.display_name_change_used
           };
           set({ user: mappedUser, onboarded: true });
           localStorage.setItem('user', JSON.stringify(mappedUser));
@@ -384,6 +524,12 @@ export const createAuthSlice = (set, get) => {
           get().loadUnlockedCards();
           get().fetchFeedPosts();
           get().fetchLeaderboard();
+          // Resolved ahead of time so advanceNode()'s season_completed branch knows
+          // whether to open the reflection flow or not the moment the season finishes,
+          // instead of racing a fresh check at that exact moment. See
+          // supabase_migration_season_reflection.sql.
+          get().checkSeasonReflectionStatus();
+          get().fetchReferralStats();
         }
       } catch (e) {
         console.warn('Supabase fetchUser failed, using local storage.');
@@ -398,113 +544,141 @@ export const createAuthSlice = (set, get) => {
       }
     },
 
+    // handleOAuthSession — called when a Supabase session lands (new login,
+    // OAuth redirect, or page-load with an existing session).
+    //
+    // Strategy (simpler than the old maybeSingle-first approach):
+    //   1. Try fetchUser() directly — SELECT * succeeds when the JWT is valid
+    //      and the profile exists (the common path for returning users).
+    //   2. If fetchUser comes back empty (profile genuinely doesn't exist yet),
+    //      INSERT a new profile row and start onboarding.
+    //   3. If INSERT fails because the row already exists (23505 on primary
+    //      key), fetchUser again as fallback — this covers any residual edge
+    //      case where step 1 somehow missed the row.
+    //
+    // Why this is more robust than the old maybeSingle() approach:
+    //   maybeSingle() returns { data: null } for BOTH "row not found" AND
+    //   "RLS denied / network error" — they're indistinguishable. The old code
+    //   treated both as "new user", tried to INSERT, hit a primary-key
+    //   constraint on an existing user, and silently left them on splash.
+    //   Using fetchUser first means the common re-login path never touches
+    //   INSERT at all.
     handleOAuthSession: async (session) => {
       if (!session?.user) return;
 
-      // App.jsx's initial supabase.auth.getSession() and its
-      // onAuthStateChange listener both fire on a fresh OAuth/email-confirm
-      // redirect, delivering the same session to this function twice,
-      // concurrently. Without this guard, both calls race the "does a
-      // profile exist yet" check, both see "no", and both try to insert —
-      // one wins, one hits a duplicate-key error and bails out silently
-      // (caught below), leaving the user stranded on whatever step they
-      // started on ("dostanu se na formulář, po odsouhlasení mě to hodí
-      // zpátky na hlavní stránku" — Discord auth genuinely succeeded, this
-      // insert race is what actually failed). The guard makes the second,
-      // redundant call a no-op instead of a race.
+      // Idempotency guard — getSession() and onAuthStateChange can both
+      // deliver the same session on a fresh OAuth redirect; the guard turns
+      // the second call into a no-op instead of a concurrent race.
       if (get()._handlingOAuthSessionId === session.user.id) return;
       set({ _handlingOAuthSessionId: session.user.id });
 
       try {
-        const { data: existingProfile } = await supabase
+        const userId = session.user.id;
+
+        console.log('[Auth] handleOAuthSession start — userId:', userId);
+
+        // ── Step 1: try to load an existing profile ──────────────────────
+        const { data: profileRow, error: fetchError } = await supabase
           .from('profiles')
-          .select('id')
-          .eq('id', session.user.id)
+          .select('*')
+          .eq('id', userId)
           .maybeSingle();
 
-        if (existingProfile) {
-          await get().fetchUser(session.user.id);
-        } else {
-          const u = get().user || DEFAULT_USER;
+        console.log('[Auth] SELECT profile result:', { found: !!profileRow, error: fetchError?.message, code: fetchError?.code });
 
-          // Discord already has a real, identifiable username — use it
-          // instead of the random "Hráč_XXX" placeholder so a Discord signup
-          // doesn't have to invent one from scratch; the nickname step still
-          // lets them edit/confirm it like everyone else. Google's metadata
-          // shape is less consistently a "handle" (often a full real name),
-          // so left as the generated placeholder on purpose.
-          const meta = session.user.user_metadata || {};
-          const discordName = session.user.app_metadata?.provider === 'discord'
-            ? (meta.full_name || meta.name || meta.preferred_username || meta.custom_claims?.global_name || null)
-            : null;
-          let attemptName = discordName || u.name || DEFAULT_USER.name;
-
-          // display_name is UNIQUE NOT NULL — a collision (most likely on
-          // the generated placeholder, see generateRandomName's comment) must
-          // not just fail the whole signup silently. Retry a few times with
-          // a fresh name instead of leaving an authenticated user with no
-          // profile row at all.
-          let insertError = null;
-          for (let attempt = 0; attempt < 5; attempt++) {
-            const { error } = await supabase.from('profiles').insert([{
-              id: session.user.id,
-              email: session.user.email,
-              display_name: attemptName,
-              xp: u.xp ?? 0,
-              uzel: u.uzel ?? 0,
-              keys_balance: u.keys_count ?? DEFAULT_USER.keys_count,
-              current_streak: u.streak ?? 0,
-              avatar_level: u.badges_count ?? 0,
-              pledge: u.pledge || DEFAULT_USER.pledge,
-              pass_holder: u.passHolder || false,
-              discord_user_id: u.discord_user_id || null
-            }]);
-            insertError = error;
-            if (!error) break;
-            const isNameCollision = error.code === '23505' && /display_name/i.test(error.message || error.details || '');
-            if (!isNameCollision) break;
-            attemptName = discordName ? `${discordName}_${Math.floor(Math.random() * 10000)}` : generateRandomName();
-          }
-
-          if (insertError) {
-            // A 23505 error on a column other than display_name almost certainly
-            // means the PRIMARY KEY (id) already exists — i.e. the profile was
-            // there all along but maybeSingle() returned null because its query
-            // ran without auth headers (JWT not yet propagated — see the SIGNED_IN
-            // comment in App.jsx). Rather than bailing out and leaving the user
-            // stuck on splash, fall back to loading the existing profile.
-            // The `return` here still executes the finally block (sessionChecked).
-            const isProfileAlreadyExists =
-              insertError.code === '23505' &&
-              !/display_name/i.test(insertError.message || insertError.details || '');
-            if (isProfileAlreadyExists) {
-              await get().fetchUser(session.user.id);
-              return;
+        if (profileRow) {
+          console.log('[Auth] Profile found → calling fetchUser');
+          // Backfill discord_user_id for accounts created before this was ever captured
+          // correctly (i.e. everyone who signed up via Discord until now) — every future
+          // Discord login is a free chance to pick it up without a migration.
+          if (!profileRow.discord_user_id) {
+            const discordUserId = extractDiscordUserId(session);
+            if (discordUserId) {
+              const { error: backfillError } = await supabase
+                .from('profiles')
+                .update({ discord_user_id: discordUserId })
+                .eq('id', userId);
+              if (backfillError) console.warn('[Auth] discord_user_id backfill failed:', backfillError.message);
+              else console.log('[Auth] discord_user_id backfilled:', discordUserId);
             }
-            throw insertError;
+          }
+          await get().fetchUser(userId);
+          return;
+        }
+
+        if (fetchError) {
+          console.warn('[Auth] profile SELECT error:', fetchError.code, fetchError.message);
+        }
+
+        // ── Step 2: no profile → INSERT (new user) ───────────────────────
+        const u = get().user || DEFAULT_USER;
+
+        const meta = session.user.user_metadata || {};
+        const discordName = session.user.app_metadata?.provider === 'discord'
+          ? (meta.full_name || meta.name || meta.preferred_username || meta.custom_claims?.global_name || null)
+          : null;
+        let attemptName = discordName || u.name || DEFAULT_USER.name;
+        const discordUserId = extractDiscordUserId(session);
+        // Captured on first app load from ?ref=CODE (see App.jsx) and, per that comment,
+        // may have been sitting in localStorage since a completely different page load
+        // (OAuth consent screen, email confirmation link). Only ever benefits the
+        // REFERRER once handle_referral_signup() resolves it server-side — this account
+        // itself gets nothing from setting it, so an unknown/garbage/self code is harmless.
+        const referredByCode = localStorage.getItem('pendingReferralCode') || null;
+
+        for (let attempt = 0; attempt < 5; attempt++) {
+          console.log('[Auth] INSERT attempt', attempt + 1, '— name:', attemptName);
+          const { error } = await supabase.from('profiles').insert([{
+            id: userId,
+            email: session.user.email,
+            display_name: attemptName,
+            xp: u.xp ?? 0,
+            uzel: u.uzel ?? 0,
+            keys_balance: u.keys_count ?? DEFAULT_USER.keys_count,
+            current_streak: u.streak ?? 0,
+            avatar_level: u.badges_count ?? 0,
+            pledge: u.pledge || DEFAULT_USER.pledge,
+            pass_holder: u.passHolder || false,
+            discord_user_id: discordUserId,
+            referred_by_code: referredByCode
+          }]);
+          if (!error) {
+            console.log('[Auth] INSERT success');
+            localStorage.removeItem('pendingReferralCode');
+            break;
           }
 
-          // A freshly inserted profile always means a brand-new account that
-          // still needs intro/slib/reward — force that regardless of
-          // whatever the locally persisted step happened to be. Covers the
-          // delayed email-confirmation case: the tab that clicks the
-          // confirmation link may be a fresh one (onboardingStep defaulted
-          // to 'splash') since registerWithEmail deliberately didn't advance
-          // the step before the session existed.
-          const finalUser = { ...DEFAULT_USER, ...u, name: attemptName, email: session.user.email };
-          set({ user: finalUser, onboardingStep: 'intro' });
-          localStorage.setItem('user', JSON.stringify(finalUser));
-          localStorage.setItem('onboardingStep', 'intro');
-          get().loadCurrentNodeData();
-          track('local_progress_migrated', { xp: u.xp, uzel: u.uzel, keys: u.keys_count, was_onboarded: get().onboarded });
+          console.warn('[Auth] INSERT error:', error.code, error.message, error.details);
+
+          // display_name collision → retry with a new name
+          const isNameCollision = error.code === '23505' && /display_name/i.test(error.message || error.details || '');
+          if (isNameCollision) {
+            attemptName = discordName
+              ? `${discordName}_${Math.floor(Math.random() * 10000)}`
+              : generateRandomName();
+            continue;
+          }
+
+          // primary-key collision OR any other error → profile might exist after all
+          // (handles both 23505 and 42501 permission-denied when INSERT policy is missing)
+          console.warn('[Auth] INSERT failed non-recoverable — trying fetchUser fallback');
+          await get().fetchUser(userId);
+          return;
         }
+
+        // Fresh profile inserted → brand-new account. Auth just succeeded (this only runs
+        // from the 'login' step), so the next thing they see is the post-login half of the
+        // flow — avatar-upgrade, not the auth screen again.
+        const finalUser = { ...DEFAULT_USER, ...u, name: attemptName, email: session.user.email };
+        set({ user: finalUser, onboardingStep: 'avatar-upgrade' });
+        localStorage.setItem('user', JSON.stringify(finalUser));
+        localStorage.setItem('onboardingStep', 'avatar-upgrade');
+        get().loadCurrentNodeData();
+        track('local_progress_migrated', { xp: u.xp, uzel: u.uzel, keys: u.keys_count, was_onboarded: get().onboarded });
+
       } catch (e) {
-        console.warn('Failed to resolve OAuth session profile.', e);
-        // Even on total failure, mark session as checked so the loading screen
-        // clears and the user can interact with the splash / login UI.
+        console.warn('[handleOAuthSession] fatal error:', e);
       } finally {
-        // sessionChecked: true MUST always land here regardless of the outcome
-        // above — it's the signal that lets the loading screen resolve.
         set({ _handlingOAuthSessionId: null, sessionChecked: true });
       }
     }

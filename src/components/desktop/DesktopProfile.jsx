@@ -1,16 +1,42 @@
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
-import { Settings as SettingsIcon, Shield, Flame, Leaf, Zap, Lock, Pencil } from 'lucide-react';
+import { supabase } from '../../api/supabaseClient';
+import { ALL_CARDS, isCardUnlocked } from '../../lib/cards';
+import { getAvatarLevel } from '../../lib/avatarLevels';
+import { Settings as SettingsIcon, Crown, Pencil, Package, ChevronRight } from 'lucide-react';
 import HraPassCard from '../common/HraPassCard';
 
 export default function DesktopProfile() {
-  const { user, openModal } = useUserStore();
+  const { user, openModal, unlockedCards, loadUnlockedCards } = useUserStore();
+  const navigate = useNavigate();
+  const [proofs, setProofs] = useState([]);
 
-  const mockBadges = [
-    { icon: <Shield size={24} />, rarity: 'rare', border: '#7C3AED', color: '#A78BFA', shadow: 'rgba(124,58,237,.3)' },
-    { icon: <Flame size={24} />, rarity: 'legendary', border: '#F5B73F', color: '#F5B73F', shadow: 'rgba(245,183,63,.45)' },
-    { icon: <Leaf size={24} />, rarity: 'success', border: '#22C55E', color: '#22C55E', shadow: 'rgba(34,197,94,.3)' },
-    { icon: <Zap size={24} />, rarity: 'epic', border: '#4AA8FF', color: '#4AA8FF', shadow: 'rgba(74,168,255,.4)' }
-  ];
+  useEffect(() => {
+    if (unlockedCards.length === 0) loadUnlockedCards();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { data } = await supabase
+        .from('feed_posts')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .eq('is_public', true)
+        .order('created_at', { ascending: false })
+        .limit(3);
+      if (!cancelled) setProofs(data || []);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const level = getAvatarLevel(user?.badges_count);
+  const ownedCards = ALL_CARDS.filter(c => isCardUnlocked(c, unlockedCards));
+  const showcase = (user?.showcaseCardKeys || []).map(key => ALL_CARDS.find(c => c.key === key)).filter(Boolean);
 
   return (
     <div style={{
@@ -22,25 +48,22 @@ export default function DesktopProfile() {
       fontFamily: 'Inter, sans-serif'
     }}>
       <div style={{ flex: 1, overflowY: 'auto', padding: '28px 36px 36px', display: 'flex', flexDirection: 'column' }}>
-        {/* Top Header Row with Settings */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
-          <div>
-            <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '11px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#6B6B8A' }}>
-              Profil Hráče
-            </span>
-          </div>
-          <span 
+          <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '11px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#6B6B8A' }}>
+            Profil Hráče
+          </span>
+          <span
             onClick={() => openModal('settings')}
-            style={{ 
-              display: 'inline-flex', 
-              width: '36px', 
-              height: '36px', 
+            style={{
+              display: 'inline-flex',
+              width: '36px',
+              height: '36px',
               borderRadius: '12px',
               background: '#241C3C',
               border: '1px solid #382C5C',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#9A9AB5', 
+              color: '#9A9AB5',
               cursor: 'pointer',
               transition: 'all 0.2s'
             }}
@@ -49,47 +72,44 @@ export default function DesktopProfile() {
           </span>
         </div>
 
-        {/* Avatar with circular progress ring + name row */}
+        {/* Avatar — level-driven color/glow (spec-10 §6) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
           <div style={{ position: 'relative', width: '112px', height: '112px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <svg viewBox="0 0 112 112" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', transform: 'rotate(-90deg)' }}>
-              <circle cx="56" cy="56" r="52" fill="none" stroke="#2A2142" strokeWidth="5"></circle>
-              <circle cx="56" cy="56" r="52" fill="none" stroke="#7C3AED" strokeWidth="5" strokeLinecap="round" strokeDasharray="326.7" strokeDashoffset="140"></circle>
-            </svg>
             <span style={{
               width: '92px',
               height: '92px',
               borderRadius: '50%',
               background: '#241C3C',
-              border: '3px solid #15111E',
-              boxShadow: '0 0 28px rgba(124,58,237,.55)',
+              border: `${level.borderWidth + 1}px solid ${level.border}`,
+              boxShadow: level.glow ? `0 0 ${level.glow + 6}px ${level.border}88` : 'none',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontFamily: "'Space Grotesk', sans-serif",
               fontWeight: '700',
               fontSize: '32px',
-              color: '#A78BFA'
+              color: level.color
             }}>
               {(user?.name || 'PE').slice(0, 2).toUpperCase()}
             </span>
-            {/* Pinned Badge Icon */}
-            <span style={{
-              position: 'absolute',
-              bottom: '2px',
-              right: '2px',
-              width: '32px',
-              height: '32px',
-              borderRadius: '50%',
-              background: '#2A1E10',
-              border: '2px solid #F5B73F',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 0 14px rgba(245,183,63,.6)'
-            }}>
-              <span style={{ display: 'inline-flex', width: '15px', height: '15px', color: '#F5B73F' }}><Flame size={15} /></span>
-            </span>
+            {user?.passHolder && (
+              <span style={{
+                position: 'absolute',
+                bottom: '2px',
+                right: '2px',
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
+                background: '#2A1E10',
+                border: '2px solid #F5B73F',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 14px rgba(245,183,63,.6)'
+              }}>
+                <span style={{ display: 'inline-flex', width: '15px', height: '15px', color: '#F5B73F' }}><Crown size={15} /></span>
+              </span>
+            )}
           </div>
 
           <div style={{ flex: 1 }}>
@@ -97,17 +117,22 @@ export default function DesktopProfile() {
               {user?.name || 'TemnýPozorovatel'}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
-              <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '11px', color: '#A78BFA', background: '#241C3C', border: '0.5px solid #7C3AED', borderRadius: '20px', padding: '4px 12px' }}>
-                {user?.rarity || 'Doer'}
+              <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '11px', color: level.color, background: '#241C3C', border: `0.5px solid ${level.border}`, borderRadius: '20px', padding: '4px 12px' }}>
+                {level.name}
               </span>
+              {user?.passHolder && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontFamily: 'Inter', fontWeight: '600', fontSize: '11px', color: '#F5B73F', background: '#2A1E10', border: '0.5px solid #F5B73F', borderRadius: '20px', padding: '4px 12px' }}>
+                  <Crown size={11} /> Founder
+                </span>
+              )}
               <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '13px', color: '#60A5FA' }}>
                 {user?.xp || 0} XP
               </span>
             </div>
           </div>
 
-          <button 
-            onClick={() => openModal('nickname')}
+          <button
+            onClick={() => openModal('settings')}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -131,14 +156,12 @@ export default function DesktopProfile() {
           </button>
         </div>
 
-        {/* User pledge quote */}
         <div style={{ borderLeft: '3px solid #7C3AED', paddingLeft: '16px', marginTop: '24px' }}>
           <span style={{ fontFamily: 'Inter', fontStyle: 'italic', fontSize: '14px', color: '#9A9AB5', lineHeight: '1.55' }}>
             „{user?.pledge || 'Jsem člověk, co přestal čekat a začal jednat.'}“
           </span>
         </div>
 
-        {/* HRA PASS Promo Banner */}
         <div style={{ marginTop: '24px' }}>
           <HraPassCard />
         </div>
@@ -146,80 +169,57 @@ export default function DesktopProfile() {
         {/* Stats row */}
         <div style={{ display: 'flex', gap: '16px', marginTop: '24px', flexShrink: 0 }}>
           <div style={{ flex: 1, background: '#15111E', border: '0.5px solid #2A2142', borderRadius: '18px', padding: '18px', textAlign: 'center' }}>
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '28px', color: '#F5B73F' }}>{user?.keys_count || 1}</div>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '28px', color: '#F5B73F' }}>{user?.keys_count ?? 0}</div>
             <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', marginTop: '3px' }}>klíčů</div>
           </div>
           <div style={{ flex: 1, background: '#15111E', border: '0.5px solid #2A2142', borderRadius: '18px', padding: '18px', textAlign: 'center' }}>
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '28px', color: '#F5B73F' }}>{user?.streak || 1}</div>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '28px', color: '#F5B73F' }}>{user?.streak ?? 0}</div>
             <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', marginTop: '3px' }}>dní v řadě</div>
           </div>
           <div style={{ flex: 1, background: '#15111E', border: '0.5px solid #2A2142', borderRadius: '18px', padding: '18px', textAlign: 'center' }}>
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '28px', color: '#22C55E' }}>12</div>
-            <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', marginTop: '3px' }}>výzev</div>
-          </div>
-          <div style={{ flex: 1, background: '#15111E', border: '0.5px solid #2A2142', borderRadius: '18px', padding: '18px', textAlign: 'center' }}>
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '28px', color: '#60A5FA' }}>#7</div>
-            <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', marginTop: '3px' }}>v žebříčku</div>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '28px', color: '#22C55E' }}>{user?.uzel ?? 0}</div>
+            <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', marginTop: '3px' }}>aktuální uzel</div>
           </div>
         </div>
 
-        {/* Badges Grid */}
-        <div style={{ marginTop: '26px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-            <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '11px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#6B6B8A' }}>
-              Odznaky · {user?.badges_count || 1} / 16
-            </span>
+        <div style={{ display: 'flex', gap: '24px', marginTop: '26px' }}>
+          {/* Showcase / mini collection */}
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '11px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#6B6B8A' }}>
+                {showcase.length > 0 ? 'Showcase' : 'Sbírka'} · {ownedCards.length}/{ALL_CARDS.length}
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
+              {(showcase.length > 0 ? showcase : ownedCards.slice(0, 4)).map(card => (
+                <div key={card.key} style={{ aspectRatio: '1', background: card.bg, border: `1.5px solid ${card.border}`, borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px' }}>
+                  <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', color: card.color, textAlign: 'center' }}>{card.title}</span>
+                </div>
+              ))}
+            </div>
+            <div
+              onClick={() => navigate('/inventory')}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '12px', color: '#A78BFA', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', cursor: 'pointer' }}
+            >
+              <Package size={14} /> Otevřít Inventář <ChevronRight size={14} />
+            </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: '14px' }}>
-            {[...Array(16)].map((_, i) => {
-              const unlocked = i < (user?.badges_count || 1);
-              if (unlocked) {
-                const styleDef = mockBadges[i % mockBadges.length];
-                return (
-                  <div
-                    key={i}
-                    onClick={() => openModal('collections')}
-                    style={{
-                      aspectRatio: '1',
-                      background: styleDef.rarity === 'legendary' ? 'linear-gradient(150deg,#3a2a10,#241a3d)' : '#241C3C',
-                      border: `1.5px solid ${styleDef.border}`,
-                      borderRadius: '16px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                      boxShadow: `0 0 12px ${styleDef.shadow}`
-                    }}
-                  >
-                    <span style={{ display: 'inline-flex', width: '24px', height: '24px', color: styleDef.color }}>
-                      {styleDef.icon}
-                    </span>
-                  </div>
-                );
-              } else {
-                return (
-                  <div
-                    key={i}
-                    onClick={() => openModal('collections')}
-                    style={{
-                      aspectRatio: '1',
-                      background: '#15111E',
-                      border: '1.5px dashed #382C5C',
-                      borderRadius: '16px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <span style={{ display: 'inline-flex', width: '20px', height: '20px', color: '#4A3D6E' }}>
-                      <Lock size={18} />
-                    </span>
-                  </div>
-                );
-              }
-            })}
+          {/* Poslední proofy */}
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '11px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#6B6B8A', marginBottom: '12px' }}>
+              Poslední důkazy
+            </div>
+            {proofs.length === 0 && (
+              <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#6B6B8A' }}>Zatím žádné veřejné důkazy.</div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {proofs.map(p => (
+                <div key={p.id} style={{ background: '#241C3C', border: '0.5px solid #382C5C', borderRadius: '14px', padding: '10px 13px' }}>
+                  <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F0F0F8', lineHeight: '1.5' }}>{p.content}</div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
