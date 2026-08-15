@@ -1,3 +1,8 @@
+## Supabase
+
+Schema, migrations, and the CLI workflow live in [`supabase/`](supabase/README.md) — read that
+before touching the database.
+
 # Getting Started with Create React App
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
