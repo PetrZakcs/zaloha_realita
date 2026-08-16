@@ -16,6 +16,15 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      # package-lock.json was generated with npm 11.17.0. Node 20's bundled npm (10.8.2)
+      # resolves this project's optional peer deps (e.g. eslint's optional `yaml` peer)
+      # differently and rejects the lockfile as out of sync ("Missing: yaml@2.9.0 from
+      # lock file") — first real thing this CI job caught, on its first real run. Pinning
+      # the exact npm version here, rather than debugging the lockfile line by line, is
+      # the standard fix: `npm ci` needs the same npm major that wrote the lockfile.
+      - name: Use matching npm version
+        run: npm install -g npm@11.17.0
+
       - name: Install dependencies
         run: npm ci
 
