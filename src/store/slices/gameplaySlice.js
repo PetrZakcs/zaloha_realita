@@ -294,12 +294,12 @@ export const createGameplaySlice = (set, get) => ({
         // refetch from Supabase instead of optimistically faking a local entry.
         get().fetchFeedPosts();
 
-        if (u.discord_user_id) {
+        if (u.discord_user_id && session?.access_token) {
           await fetch(`${process.env.REACT_APP_SUPABASE_URL}/functions/v1/airtable-sync`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${process.env.REACT_APP_SUPABASE_ANON_KEY}`
+              'Authorization': `Bearer ${session.access_token}`
             },
             body: JSON.stringify({
               discordUserId: u.discord_user_id,

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { track } from '../../lib/analytics';
 import { buildReferralLink, shareContent } from '../../lib/share';
-import { Flame, CheckCircle2, Eye, Share2, ImageIcon, Plus, Crown, ArrowRight } from 'lucide-react';
+import { Flame, Sprout, Eye, Share2, ImageIcon, Plus, Crown, ArrowRight } from 'lucide-react';
 
 export default function DesktopFeed() {
   const {
@@ -267,24 +267,27 @@ export default function DesktopFeed() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginTop: '10px' }}>
                       <span
                         onClick={(e) => { e.stopPropagation(); addReaction(post.id, 'fire'); }}
+                        title="Respekt / Oheň"
                         style={{ display: 'flex', alignItems: 'center', gap: '4px', fontFamily: 'Inter', fontSize: '11px', color: '#F5B73F', cursor: 'pointer' }}
                       >
                         <span style={{ display: 'inline-flex', width: '14px', height: '14px' }}><Flame size={14} /></span>
-                        {post.reactions_fire}
+                        {post.reactions_fire || 0}
                       </span>
                       <span
-                        onClick={(e) => { e.stopPropagation(); addReaction(post.id, 'lightning'); }}
+                        onClick={(e) => { e.stopPropagation(); addReaction(post.id, 'plant'); }}
+                        title="Růst / Zásah do reality"
                         style={{ display: 'flex', alignItems: 'center', gap: '4px', fontFamily: 'Inter', fontSize: '11px', color: '#22C55E', cursor: 'pointer' }}
                       >
-                        <span style={{ display: 'inline-flex', width: '14px', height: '14px' }}><CheckCircle2 size={14} /></span>
-                        {post.reactions_lightning}
+                        <span style={{ display: 'inline-flex', width: '14px', height: '14px' }}><Sprout size={14} /></span>
+                        {post.reactions_plant ?? post.reactions_lightning ?? 0}
                       </span>
                       <span
                         onClick={(e) => { e.stopPropagation(); addReaction(post.id, 'eye'); }}
+                        title="Pozorováno"
                         style={{ display: 'flex', alignItems: 'center', gap: '4px', fontFamily: 'Inter', fontSize: '11px', color: '#A78BFA', cursor: 'pointer' }}
                       >
                         <span style={{ display: 'inline-flex', width: '14px', height: '14px' }}><Eye size={14} /></span>
-                        {post.reactions_eye}
+                        {post.reactions_eye || 0}
                       </span>
                       <span style={{ flex: 1 }}></span>
                       <span

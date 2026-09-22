@@ -40,6 +40,22 @@ serve(async (req) => {
   }
 
   try {
+    const authHeader = req.headers.get("Authorization") || "";
+    const cronSecretHeader = req.headers.get("x-cron-secret") || "";
+    const expectedServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    const expectedCronSecret = Deno.env.get("CRON_SECRET") || "";
+
+    const isAuthorized =
+      (expectedServiceKey && authHeader.includes(expectedServiceKey)) ||
+      (expectedCronSecret && (authHeader.includes(expectedCronSecret) || cronSecretHeader === expectedCronSecret));
+
+    if (!isAuthorized && (expectedServiceKey || expectedCronSecret)) {
+      return new Response(JSON.stringify({ error: "Unauthorized cron/service invocation" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
       return new Response(JSON.stringify({ error: "VAPID keys not configured" }), {
         status: 500,

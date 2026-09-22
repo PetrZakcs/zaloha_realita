@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { track } from '../../lib/analytics';
 import { buildReferralLink, shareContent } from '../../lib/share';
-import { SlidersHorizontal, Shield, Crown, Flame, CheckCircle2, Eye, Share2, ImageIcon, ChevronRight, ArrowRight } from 'lucide-react';
+import { SlidersHorizontal, Shield, Crown, Flame, Sprout, Eye, Share2, ImageIcon, ChevronRight, ArrowRight } from 'lucide-react';
 
 export default function MobileFeed() {
   const {
@@ -21,8 +21,7 @@ export default function MobileFeed() {
   const [filter, setFilter] = useState('all');
 
   // Real share (spec-7 "MOMENT 5 — FEED VIRAL"): each proof's "Sdílet" carries the sharer's
-  // own referral link, not a bare app link — that's what makes it attributable. Was
-  // previously mis-wired to openModal('paywall') on every click; see git history.
+  // own referral link, not a bare app link — that's what makes it attributable.
   const handleShareProof = async (post) => {
     track('share_clicked', { post_id: post.id });
     const result = await shareContent({
@@ -33,12 +32,7 @@ export default function MobileFeed() {
     if (result.shared) track('share_completed', { post_id: post.id, method: result.method });
   };
 
-  // "Zkus taky" (spec-6 §6) — the Story screen only ever shows the *viewer's own* current
-  // node/challenge, not an arbitrary one a post came from (feed_posts doesn't carry a node
-  // reference, and Story.jsx has no "preview node N" mode). A precise per-post deep link
-  // would need both of those built out; until then this is a deliberately honest, smaller
-  // version — it sends the viewer to their own current challenge rather than pretending to
-  // land them on the exact one pictured.
+  // "Zkus taky" (spec-6 §6) — sends the viewer to their challenge loop
   const handleTryToo = (post) => {
     track('try_too_clicked', { post_id: post.id });
     navigate('/story');
@@ -70,14 +64,14 @@ export default function MobileFeed() {
 
   const ReactionsRow = ({ post, showTryToo }) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginTop: '12px' }}>
-      <span onClick={() => addReaction(post.id, 'fire')} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#F5B73F', cursor: 'pointer' }}>
-        <span style={{ display: 'inline-flex', width: '16px', height: '16px' }}><Flame size={14} /></span>{post.reactions_fire}
+      <span onClick={() => addReaction(post.id, 'fire')} title="Respekt / Oheň" style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#F5B73F', cursor: 'pointer' }}>
+        <span style={{ display: 'inline-flex', width: '16px', height: '16px' }}><Flame size={14} /></span>{post.reactions_fire || 0}
       </span>
-      <span onClick={() => addReaction(post.id, 'lightning')} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#22C55E', cursor: 'pointer' }}>
-        <span style={{ display: 'inline-flex', width: '16px', height: '16px' }}><CheckCircle2 size={14} /></span>{post.reactions_lightning}
+      <span onClick={() => addReaction(post.id, 'plant')} title="Růst / Zásah do reality" style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#22C55E', cursor: 'pointer' }}>
+        <span style={{ display: 'inline-flex', width: '16px', height: '16px' }}><Sprout size={14} /></span>{post.reactions_plant ?? post.reactions_lightning ?? 0}
       </span>
-      <span onClick={() => addReaction(post.id, 'eye')} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#A78BFA', cursor: 'pointer' }}>
-        <span style={{ display: 'inline-flex', width: '16px', height: '16px' }}><Eye size={14} /></span>{post.reactions_eye}
+      <span onClick={() => addReaction(post.id, 'eye')} title="Pozorováno" style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#A78BFA', cursor: 'pointer' }}>
+        <span style={{ display: 'inline-flex', width: '16px', height: '16px' }}><Eye size={14} /></span>{post.reactions_eye || 0}
       </span>
       <span style={{ flex: 1 }}></span>
       {showTryToo && (

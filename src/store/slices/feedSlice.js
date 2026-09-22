@@ -9,6 +9,7 @@ export const DEFAULT_FEED = [
     type: 'PROOF',
     content: 'Sebrala 3 kelímky 🟢',
     reactions_fire: 34,
+    reactions_plant: 12,
     reactions_lightning: 12,
     reactions_eye: 84,
     created_at: new Date(Date.now() - 600000).toISOString(),
@@ -21,6 +22,7 @@ export const DEFAULT_FEED = [
     type: 'PROOF',
     content: 'Napsal kámošce po půl roce',
     reactions_fire: 21,
+    reactions_plant: 5,
     reactions_lightning: 5,
     reactions_eye: 46,
     created_at: new Date(Date.now() - 3600000).toISOString(),
@@ -35,6 +37,7 @@ export const DEFAULT_FEED = [
     type: 'STATUS',
     content: 'Dokončil jsem celou Season 0 a sejmul bossa! 👑',
     reactions_fire: 120,
+    reactions_plant: 44,
     reactions_lightning: 44,
     reactions_eye: 382,
     created_at: new Date(Date.now() - 7200000).toISOString(),
@@ -73,7 +76,8 @@ export const createFeedSlice = (set, get) => {
               content: payload.new.content,
               image_url: payload.new.image_url || null,
               reactions_fire: payload.new.reactions_fire || 0,
-              reactions_lightning: payload.new.reactions_lightning || 0,
+              reactions_plant: payload.new.reactions_plant ?? payload.new.reactions_lightning ?? 0,
+              reactions_lightning: payload.new.reactions_plant ?? payload.new.reactions_lightning ?? 0,
               reactions_eye: payload.new.reactions_eye || 0,
               created_at: payload.new.created_at,
               is_public: payload.new.is_public
@@ -84,7 +88,8 @@ export const createFeedSlice = (set, get) => {
               feed: state.feed.map(item => item.id === payload.new.id ? {
                 ...item,
                 reactions_fire: payload.new.reactions_fire || 0,
-                reactions_lightning: payload.new.reactions_lightning || 0,
+                reactions_plant: payload.new.reactions_plant ?? payload.new.reactions_lightning ?? 0,
+                reactions_lightning: payload.new.reactions_plant ?? payload.new.reactions_lightning ?? 0,
                 reactions_eye: payload.new.reactions_eye || 0
               } : item)
             }));
@@ -136,7 +141,8 @@ export const createFeedSlice = (set, get) => {
             content: p.content,
             image_url: p.image_url || null,
             reactions_fire: p.reactions_fire || 0,
-            reactions_lightning: p.reactions_lightning || 0,
+            reactions_plant: p.reactions_plant ?? p.reactions_lightning ?? 0,
+            reactions_lightning: p.reactions_plant ?? p.reactions_lightning ?? 0,
             reactions_eye: p.reactions_eye || 0,
             created_at: p.created_at,
             is_public: p.is_public
@@ -171,34 +177,47 @@ export const createFeedSlice = (set, get) => {
     },
 
     addReaction: async (postId, type) => {
-      // spec-11 "FEED & SOCIAL" KPI: reaction count / % hráčů co reagují — previously
-      // completely untracked, only inferable indirectly from the reactions_* columns
-      // themselves (which don't say WHO reacted or WHEN, just a running total).
-      track('reaction_added', { post_id: postId, reaction_type: type });
+      const normalizedType = (type === 'lightning' || type === 'plant') ? 'plant' : type;
+      // spec-11 "FEED & SOCIAL" KPI: reaction count / % hráčů co reagují
+      track('reaction_added', { post_id: postId, reaction_type: normalizedType });
 
+      // Optimistic state update
       set(state => ({
         feed: state.feed.map(item => {
           if (item.id === postId) {
-            if (type === 'fire') return { ...item, reactions_fire: item.reactions_fire + 1 };
-            if (type === 'lightning') return { ...item, reactions_lightning: item.reactions_lightning + 1 };
-            if (type === 'eye') return { ...item, reactions_eye: item.reactions_eye + 1 };
+            if (normalizedType === 'fire') return { ...item, reactions_fire: (item.reactions_fire || 0) + 1 };
+            if (normalizedType === 'plant') {
+              const newVal = (item.reactions_plant || item.reactions_lightning || 0) + 1;
+              return { ...item, reactions_plant: newVal, reactions_lightning: newVal };
+            }
+            if (normalizedType === 'eye') return { ...item, reactions_eye: (item.reactions_eye || 0) + 1 };
           }
           return item;
         })
       }));
 
       try {
-        const { data: currentItem } = await supabase.from('feed_posts').select('*').eq('id', postId).single();
-        if (currentItem) {
-          const updateFields = {};
-          if (type === 'fire') updateFields.reactions_fire = (currentItem.reactions_fire || 0) + 1;
-          if (type === 'lightning') updateFields.reactions_lightning = (currentItem.reactions_lightning || 0) + 1;
-          if (type === 'eye') updateFields.reactions_eye = (currentItem.reactions_eye || 0) + 1;
+        // Atomic server increment via SECURITY DEFINER RPC
+        const { data, error } = await supabase.rpc('increment_feed_reaction', {
+          p_post_id: postId,
+          p_type: normalizedType
+        });
+        if (error) throw error;
 
-          await supabase.from('feed_posts').update(updateFields).eq('id', postId);
+        if (data && data.length > 0) {
+          const row = data[0];
+          set(state => ({
+            feed: state.feed.map(item => item.id === postId ? {
+              ...item,
+              reactions_fire: row.reactions_fire,
+              reactions_plant: row.reactions_plant,
+              reactions_lightning: row.reactions_plant,
+              reactions_eye: row.reactions_eye
+            } : item)
+          }));
         }
       } catch (e) {
-        console.warn('Failed to register reaction updates in database.', e);
+        console.warn('Failed to register atomic reaction via RPC.', e);
       }
     }
   };

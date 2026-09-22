@@ -109,12 +109,14 @@ export default function ModalManager() {
   // Reset the proof form each time the upload modal is (re)opened
   useEffect(() => {
     if (activeModal === 'proof-upload') {
-      setProofMode('photo');
+      const defaultMode = activeChallenge?.proof_type === 'TEXT' ? 'text' : 'photo';
+      setProofMode(defaultMode);
       setPhotoFile(null);
       setPhotoPreviewUrl(null);
       setTextProof('');
+      setPublicToggle(true);
     }
-  }, [activeModal]);
+  }, [activeModal, activeChallenge?.proof_type]);
 
   // Revoke the object URL when it changes or the component unmounts, to avoid leaking memory
   useEffect(() => {
