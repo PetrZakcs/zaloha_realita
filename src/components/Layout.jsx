@@ -155,7 +155,7 @@ export default function Layout() {
                   padding: '4px 8px',
                   cursor: 'pointer'
                 }} onClick={() => { track('paywall_opened', { source: 'header_badge_active' }); openModal('paywall'); }}>
-                  PASS
+                  👑 Founder
                 </span>
               ) : (
                 <span style={{
@@ -168,7 +168,7 @@ export default function Layout() {
                   padding: '4px 8px',
                   cursor: 'pointer'
                 }} onClick={() => { track('paywall_opened', { source: 'header_badge_upsell' }); openModal('paywall'); }}>
-                  + PASS
+                  🔓 Odemkni Pass
                 </span>
               )}
               <span style={{

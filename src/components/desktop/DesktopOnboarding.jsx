@@ -7,6 +7,7 @@ import { DESKTOP_ONBOARDING_STEPS } from '../../store/slices/authSlice';
 import { Sparkles, MonitorDown, Check, Radio, Gift, Crown, ArrowDown, ArrowUp } from 'lucide-react';
 import EmailAuthForm from '../onboarding/EmailAuthForm';
 import { GoogleIcon, DiscordIcon } from '../onboarding/AuthIcons';
+import { EXTRA_OAUTH_PROVIDERS } from '../../lib/authProviders';
 import { usePwaInstall } from '../../hooks/usePwaInstall';
 
 const RADIUS = 16;
@@ -244,6 +245,11 @@ export default function DesktopOnboarding() {
           <button onClick={() => handleOAuthClick('discord')} disabled={pendingProvider === 'discord'} style={oauthButtonStyle(pendingProvider === 'discord')}>
             <DiscordIcon size={18} /> {pendingProvider === 'discord' ? 'Připojuji…' : 'Pokračovat přes Discord'}
           </button>
+          {EXTRA_OAUTH_PROVIDERS.map(p => (
+            <button key={p.id} onClick={() => handleOAuthClick(p.id)} disabled={pendingProvider === p.id} style={oauthButtonStyle(pendingProvider === p.id)}>
+              {pendingProvider === p.id ? 'Připojuji…' : `Pokračovat přes ${p.label}`}
+            </button>
+          ))}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '16px 0' }}>

@@ -60,10 +60,38 @@ Instead:
 supabase migration new short_description   # creates a correctly-timestamped empty file here
 ```
 
-Write the change, then `supabase db push` it. If it touches a function shared with
-`consolidated_functions.sql` (`protect_profile_privileges`, `advance_node`, `complete_challenge`,
-`submit_season_reflection`, `handle_referral_signup`), redefine it there too — same reason that
-file exists in the first place (see its own header).
+Write the change, then `supabase db push` it. Migrations run in timestamp order, so the
+**latest** file that `CREATE OR REPLACE`s a function is its live version. When you change one of
+the shared functions, copy its body from that latest file into a new migration — don't edit
+`consolidated_functions.sql` (already applied, `db push` won't re-run it). Current live versions:
+
+| Function | Latest definition |
+|---|---|
+| `protect_profile_privileges`, `complete_challenge`, `advance_node`, `increment_feed_reaction`, `set_default_referral_code` | `20260925120000_security_audit_fixes.sql` |
+| `handle_referral_signup`, `handle_referral_activation`, `report_post`, `get_weekly_top_doers`, `open_mystery_box`, `grant_earned_mystery_boxes` | `20260925130000_mvp1_spec_debt.sql` |
+| `submit_season_reflection` | `20260816004546_consolidated_functions.sql` |
+
+## Deploying the 2026-09-25 security fixes
+
+`20260925120000_security_audit_fixes.sql` and the edge-function changes go out together — the
+client (`plan` instead of `priceId`, the player's JWT on checkout, `publish_pledge`,
+`record_daily_activity`, `sync_discord_identity`) depends on both.
+
+1. `supabase db push`
+2. Edge Function secrets (`supabase secrets set KEY=value`):
+   - `APP_URL` — production app origin, e.g. `https://<your-domain>` (Stripe success/cancel
+     redirect; checkout refuses to run without it)
+   - `STRIPE_PRICE_ID_MONTHLY` — the 149 Kč/month recurring Price
+   - `STRIPE_PRICE_ID_YEARLY`, `STRIPE_PRICE_ID_DEPOSIT` — optional, only once those plans exist
+3. `supabase functions deploy stripe-checkout stripe-webhook airtable-sync`
+4. Stripe dashboard → Webhooks: besides `checkout.session.completed`, also send
+   `customer.subscription.updated` and `customer.subscription.deleted` (Pass revocation).
+5. Deploy the frontend (Vercel). `REACT_APP_STRIPE_PRICE_ID` is no longer read and can be removed.
+6. If `hello-world` was ever deployed: `supabase functions delete hello-world`.
+
+Existing Founder Pass holders who paid before this change have no row in `subscriptions`, so a
+later cancellation of *their* subscription is matched via the subscription's `metadata.user_id`
+only if it was set — older subscriptions don't carry it. Check them once in the Stripe dashboard.
 
 ## Known gap
 
@@ -71,3 +99,21 @@ file exists in the first place (see its own header).
 `YOUR_SERVICE_ROLE_KEY` placeholders in its `SECTION 3` cron job, and the `send-retention-push`
 Edge Function it schedules hasn't been deployed. Tracked as **TD-14** in the tech-debt backlog —
 push opt-in works client-side, actual sending is currently a silent no-op.
+
+## Deploying the 2026-09-25 MVP1 spec-debt batch
+
+Goes out together with (after) the security fixes above.
+
+1. `supabase db push` (applies `20260925130000_mvp1_spec_debt.sql`: paywall after node 3,
+   referral rewards on activation, reports, weekly Top Doers, mystery boxes).
+2. `supabase functions deploy stripe-portal` and enable the Customer Portal in Stripe
+   (Settings → Billing → Customer portal) — that's where players cancel the Pass.
+3. **Mystery box content:** `mystery_box_pool` starts empty on purpose — Season 0 album cards
+   each have their own earning condition and must not drop randomly. Until the client supplies
+   box content, boxes are granted but opening says the content is being prepared.
+4. Optional frontend env flags (Vercel), each only once the dependency exists:
+   - `REACT_APP_PASS_YEARLY_ENABLED=true` — needs `STRIPE_PRICE_ID_YEARLY` (999 Kč/rok)
+   - `REACT_APP_DEPOSIT_ENABLED=true` — needs `STRIPE_PRICE_ID_DEPOSIT` (49/99 Kč záloha)
+   - `REACT_APP_AUTH_APPLE_ENABLED=true` / `REACT_APP_AUTH_FACEBOOK_ENABLED=true` — needs the
+     provider enabled in Supabase Auth
+   - `REACT_APP_DISCORD_INVITE_URL`, `REACT_APP_DISCORD_VIP_URL` — community / VIP room links

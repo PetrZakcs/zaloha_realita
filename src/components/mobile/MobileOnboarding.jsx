@@ -7,6 +7,7 @@ import { MOBILE_ONBOARDING_STEPS } from '../../store/slices/authSlice';
 import { Radio, Sparkles, Gift, Crown, Share, ArrowDown, ArrowUp } from 'lucide-react';
 import EmailAuthForm from '../onboarding/EmailAuthForm';
 import { GoogleIcon, DiscordIcon } from '../onboarding/AuthIcons';
+import { EXTRA_OAUTH_PROVIDERS } from '../../lib/authProviders';
 import { usePwaInstall } from '../../hooks/usePwaInstall';
 
 const RADIUS = 16;
@@ -208,6 +209,11 @@ export default function MobileOnboarding() {
             <button onClick={() => handleOAuthClick('discord')} disabled={pendingProvider === 'discord'} style={oauthButtonStyle(pendingProvider === 'discord')}>
               <DiscordIcon size={18} /> {pendingProvider === 'discord' ? 'Připojuji…' : 'Pokračovat přes Discord'}
             </button>
+            {EXTRA_OAUTH_PROVIDERS.map(p => (
+              <button key={p.id} onClick={() => handleOAuthClick(p.id)} disabled={pendingProvider === p.id} style={oauthButtonStyle(pendingProvider === p.id)}>
+                {pendingProvider === p.id ? 'Připojuji…' : `Pokračovat přes ${p.label}`}
+              </button>
+            ))}
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '2px 0' }}>
               <div style={{ flex: 1, height: '1px', background: '#382C5C' }}></div>

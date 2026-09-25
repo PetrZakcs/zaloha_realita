@@ -2,7 +2,13 @@ import { useEffect, useState } from 'react';
 import { useUserStore } from '../../store/userStore';
 import { track } from '../../lib/analytics';
 import { buildReferralLink, shareContent } from '../../lib/share';
+import { startCheckout } from '../../lib/checkout';
 import { ArrowRight, Share2, Sparkles, Lock, Check } from 'lucide-react';
+
+// Optional, configured per environment once the client supplies them.
+const VIP_DISCORD_URL = process.env.REACT_APP_DISCORD_VIP_URL || '';
+const DEPOSIT_ENABLED = process.env.REACT_APP_DEPOSIT_ENABLED === 'true';
+
 
 // "Referenční uzel" (MVP1 spec-5) — shown once, right after season completion. Eight steps,
 // each intentionally tiny (spec's own "žádný dead time" rule): pre-frame -> reflection pause
@@ -64,6 +70,8 @@ export default function SeasonReflectionFlow() {
 
   const [submitting, setSubmitting] = useState(false);
   const [shareState, setShareState] = useState('idle'); // idle | copied
+  const [priceAnswer, setPriceAnswer] = useState(null);
+  const [wantsNextTheme, setWantsNextTheme] = useState(false);
 
   const go = (next) => setSeasonReflectionStep(next);
 
@@ -312,8 +320,59 @@ export default function SeasonReflectionFlow() {
           <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', marginTop: '8px', lineHeight: '1.5' }}>
             Získal/a jsi odznak <strong style={{ color: '#F0F0F8' }}>Light Bearer Season 0</strong> a přístup do VIP Discord roomu.
           </div>
-          {/* TODO(klient): až bude hotový VIP Discord room, doplnit sem skutečný invite
-              link/CTA. Zatím jen textová zmínka — nic neodkazuje nikam naslepo. */}
+          {VIP_DISCORD_URL && (
+            <a
+              href={VIP_DISCORD_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => track('vip_discord_clicked')}
+              style={{ display: 'block', fontFamily: 'Inter', fontWeight: 600, fontSize: '13px', color: '#A78BFA', marginTop: '12px' }}
+            >
+              Vstoupit do VIP Discord roomu →
+            </a>
+          )}
+
+          {/* spec-19 C) monetization signals: price sensitivity, purchase intent, deposit */}
+          <div style={{ marginTop: '20px', textAlign: 'left', background: '#1C1630', border: '0.5px solid #382C5C', borderRadius: '14px', padding: '14px' }}>
+            <div style={{ fontFamily: 'Inter', fontWeight: 600, fontSize: '13px', color: '#F0F0F8' }}>Kolik bys dal/a za pokračování?</div>
+            <div style={{ display: 'flex', gap: '6px', marginTop: '10px', flexWrap: 'wrap' }}>
+              {[49, 99, 149, 199].map(price => (
+                <button
+                  key={price}
+                  type="button"
+                  onClick={() => { setPriceAnswer(price); track('price_sensitivity_answered', { price_czk: price }); }}
+                  style={{
+                    fontFamily: 'Inter', fontWeight: 600, fontSize: '12px', borderRadius: '20px', padding: '6px 12px', cursor: 'pointer',
+                    background: priceAnswer === price ? '#7C3AED' : 'transparent', color: priceAnswer === price ? '#fff' : '#A78BFA',
+                    border: '1px solid #7C3AED'
+                  }}
+                >
+                  {price} Kč
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              disabled={wantsNextTheme}
+              onClick={() => { setWantsNextTheme(true); track('purchase_intent_next_theme'); }}
+              style={{ marginTop: '12px', background: 'none', border: 'none', padding: 0, fontFamily: 'Inter', fontWeight: 600, fontSize: '13px', color: wantsNextTheme ? '#22C55E' : '#F5B73F', cursor: wantsNextTheme ? 'default' : 'pointer' }}
+            >
+              {wantsNextTheme ? '✓ Dáme ti vědět, až bude další téma' : 'Chci další téma →'}
+            </button>
+            {DEPOSIT_ENABLED && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const result = await startCheckout('deposit');
+                  if (result.error) alert('Rezervaci se nepodařilo zahájit. Zkus to prosím později.');
+                }}
+                style={{ display: 'block', marginTop: '10px', background: 'none', border: 'none', padding: 0, fontFamily: 'Inter', fontWeight: 600, fontSize: '13px', color: '#F5B73F', cursor: 'pointer' }}
+              >
+                Rezervuj si místo v další sezóně (vratná záloha) →
+              </button>
+            )}
+          </div>
+
           <StepButton
             onClick={() => {
               track('referential_node_completed');

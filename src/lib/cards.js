@@ -27,3 +27,22 @@ export function isCardUnlocked(card, unlockedCards) {
 export function findCard(cardKey) {
   return ALL_CARDS.find(c => c.key === cardKey) || null;
 }
+
+// Mystery box pool items (mystery_box_pool table) rendered with the same shape as ALL_CARDS,
+// so Inventory/showcase can show box drops next to the static catalog.
+const POOL_RARITY_STYLE = {
+  common: { bg: '#1C1630', border: '#9A9AB5', color: '#C4C4DA' },
+  rare: { bg: '#14223D', border: '#4AA8FF', color: '#4AA8FF' },
+  epic: { bg: '#241a3d', border: '#A78BFA', color: '#A78BFA' },
+  legendary: { bg: '#2A1E10', border: '#F5B73F', color: '#F5B73F' },
+};
+
+export function poolItemToCard(item) {
+  const style = POOL_RARITY_STYLE[item.rarity] || POOL_RARITY_STYLE.common;
+  return { key: item.card_key, title: item.title, ...style };
+}
+
+export function buildCatalog(boxPool = []) {
+  const known = new Set(ALL_CARDS.map(c => c.key));
+  return [...ALL_CARDS, ...boxPool.filter(i => !known.has(i.card_key)).map(poolItemToCard)];
+}

@@ -4,6 +4,8 @@ import { track } from '../../lib/analytics';
 export const createGameplaySlice = (set, get) => ({
   activeModal: null,
   mockLogs: [],
+  proofError: null,
+  lastReward: null,
   proofsSubmittedCount: parseInt(localStorage.getItem('proofsSubmittedCount') || '0', 10),
 
   activeChallenge: {
@@ -47,7 +49,7 @@ export const createGameplaySlice = (set, get) => ({
   ],
 
   openModal: (modalName) => set({ activeModal: modalName }),
-  closeModal: () => set({ activeModal: null }),
+  closeModal: () => set({ activeModal: null, proofError: null }),
 
   loadCurrentNodeData: async () => {
     const u = get().user;
@@ -226,136 +228,133 @@ export const createGameplaySlice = (set, get) => ({
   },
 
   submitProof: async (proofData) => {
-    set({ activeModal: 'mock-loader', mockLogs: ['Inicializace Zaya_SYS...'] });
+    // Loader copy describes what actually happens — the previous "Kontrola GPS koordinátů" /
+    // "Ověření reálnosti: 100% OK" lines implied a verification that doesn't exist.
+    set({ activeModal: 'mock-loader', proofError: null, mockLogs: ['Zaya_SYS přijímá tvůj důkaz...'] });
+    await new Promise(r => setTimeout(r, 400));
 
-    await new Promise(r => setTimeout(r, 450));
-    set(s => ({ mockLogs: [...s.mockLogs, 'Kontrola GPS koordinátů...'] }));
-    await new Promise(r => setTimeout(r, 550));
-
-    let imageUrl = null;
-    if (proofData.photoFile) {
-      set(s => ({ mockLogs: [...s.mockLogs, 'Nahrávání fotografie...'] }));
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          const ext = proofData.photoFile.name.split('.').pop() || 'jpg';
-          const path = `${session.user.id}/${Date.now()}.${ext}`;
-          const { error: uploadError } = await supabase.storage
-            .from('proofs')
-            .upload(path, proofData.photoFile);
-          if (!uploadError) {
-            const { data: publicUrlData } = supabase.storage.from('proofs').getPublicUrl(path);
-            imageUrl = publicUrlData?.publicUrl || null;
-          } else {
-            console.warn('Photo upload failed, continuing without image.', uploadError);
-          }
-        }
-      } catch (e) {
-        console.warn('Photo upload failed, continuing without image.', e);
-      }
-    }
-
-    set(s => ({ mockLogs: [...s.mockLogs, 'Skenování okolních objektů...'] }));
-    await new Promise(r => setTimeout(r, 500));
-    set(s => ({ mockLogs: [...s.mockLogs, 'Ověření reálnosti: 100% OK'] }));
-    await new Promise(r => setTimeout(r, 500));
+    const fail = (message, error) => {
+      console.warn('submitProof failed.', error);
+      track('proof_submit_failed', { reason: String(error?.message || error || message) });
+      // Back to the proof form with the player's input intact — never a fake local reward.
+      set({ activeModal: 'proof-upload', proofError: message });
+    };
 
     const u = get().user;
     const c = get().activeChallenge;
-    if (u) {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) throw new Error('No active Supabase session');
-
-        // All reward-granting logic (server-validated amounts, atomic completion
-        // check + grant, feed_posts/key_transactions/user_cards writes) now lives
-        // in the complete_challenge() RPC — the client no longer computes or
-        // writes reward amounts directly. See supabase_migration_profiles_security.sql.
-        const { data, error } = await supabase.rpc('complete_challenge', {
-          p_challenge_id: c ? c.id : 'c-npc-challenge',
-          p_proof_text: proofData.text || null,
-          p_image_url: imageUrl,
-          p_is_public: !!proofData.is_public
-        });
-        if (error) throw error;
-
-        const result = Array.isArray(data) ? data[0] : data;
-        const updatedUser = {
-          ...u,
-          xp: result.new_xp,
-          keys_count: result.new_keys_balance,
-          badges_count: result.new_avatar_level
-        };
-        set({ user: updatedUser });
-        localStorage.setItem('user', JSON.stringify(updatedUser));
-
-        get().loadUnlockedCards();
-        // complete_challenge() already inserted the real feed_posts row server-side —
-        // refetch from Supabase instead of optimistically faking a local entry.
-        get().fetchFeedPosts();
-
-        if (u.discord_user_id && session?.access_token) {
-          await fetch(`${process.env.REACT_APP_SUPABASE_URL}/functions/v1/airtable-sync`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${session.access_token}`
-            },
-            body: JSON.stringify({
-              discordUserId: u.discord_user_id,
-              cardKey: 'doer-mvp1'
-            })
-          });
-        }
-      } catch (e) {
-        // Preserves the app's existing offline/demo-mode resilience: if the RPC
-        // fails (no session, network down, or a locally-faked activeChallenge.id
-        // like "npc-challenge"/"c-node-N" that doesn't exist server-side), fall
-        // back to a LOCAL-ONLY reward. This is not persisted server-side.
-        console.warn('complete_challenge RPC failed, using local-only reward (not persisted).', e);
-        const xpReward = c ? c.reward_xp : 50;
-        // MVP1 spec (Feed §7): private proof grants XP but ZERO keys — mirrors the
-        // p_is_public gating in complete_challenge() (supabase_migration_profiles_security.sql).
-        // Keep this fallback's amounts in sync with that RPC, not a separate "+1 bonus"
-        // formula, so demo/offline mode doesn't quietly promise different rewards.
-        const keysReward = proofData.is_public ? (c ? c.reward_keys : 2) : 0;
-        const updatedUser = {
-          ...u,
-          xp: u.xp + xpReward,
-          keys_count: u.keys_count + keysReward,
-          badges_count: u.badges_count < 5 ? u.badges_count + 1 : u.badges_count
-        };
-        set({ user: updatedUser });
-        localStorage.setItem('user', JSON.stringify(updatedUser));
-
-        const newFeedItem = {
-          id: 'new_' + Date.now(),
-          user_name: u.name,
-          rarity: u.rarity,
-          content: proofData.text || 'Prokázal jsem, že nejsem NPC! 🟢',
-          image_url: imageUrl,
-          reactions_fire: 0,
-          reactions_lightning: 0,
-          reactions_eye: 0,
-          created_at: new Date().toISOString(),
-          is_public: proofData.is_public
-        };
-        set(state => ({ feed: [newFeedItem, ...state.feed] }));
-      }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!u || !session || !c?.id) {
+      fail('Pro odeslání důkazu musíš být přihlášený/á.', 'no session or challenge');
+      return;
     }
 
-    const proofsSubmitted = get().proofsSubmittedCount + 1;
-    set({ proofsSubmittedCount: proofsSubmitted });
+    let imageUrl = null;
+    if (proofData.photoFile) {
+      set(s => ({ mockLogs: [...s.mockLogs, 'Nahrávám fotografii...'] }));
+      const ext = (proofData.photoFile.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `${session.user.id}/${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from('proofs').upload(path, proofData.photoFile);
+      if (uploadError) {
+        fail('Fotku se nepodařilo nahrát. Zkus menší obrázek (max 10 MB, JPG/PNG/WebP/HEIC).', uploadError);
+        return;
+      }
+      imageUrl = supabase.storage.from('proofs').getPublicUrl(path).data?.publicUrl || null;
+    }
+
+    set(s => ({ mockLogs: [...s.mockLogs, 'Zapisuji zásah do světa...'] }));
+
+    // All reward-granting logic (server-validated amounts, node check, atomic completion +
+    // grant, feed_posts/key_transactions/user_cards writes) lives in complete_challenge().
+    const { data, error } = await supabase.rpc('complete_challenge', {
+      p_challenge_id: c.id,
+      p_proof_text: proofData.text || null,
+      p_image_url: imageUrl,
+      p_is_public: !!proofData.is_public
+    });
+    if (error) {
+      fail('Důkaz se nepodařilo uložit. Zkontroluj připojení a zkus to znovu.', error);
+      return;
+    }
+
+    const result = Array.isArray(data) ? data[0] : data;
+    const updatedUser = {
+      ...u,
+      xp: result.new_xp,
+      keys_count: result.new_keys_balance,
+      badges_count: result.new_avatar_level
+    };
+
+    const proofsSubmitted = result.already_completed ? get().proofsSubmittedCount : get().proofsSubmittedCount + 1;
+    set({
+      user: updatedUser,
+      proofsSubmittedCount: proofsSubmitted,
+      // What the celebration screens show — the real server result, not fixed numbers.
+      lastReward: {
+        alreadyCompleted: !!result.already_completed,
+        isPublic: !!proofData.is_public,
+        xpGained: Math.max(0, result.new_xp - (u.xp || 0)),
+        keysGained: Math.max(0, result.new_keys_balance - (u.keys_count || 0)),
+        levelBefore: u.badges_count || 0,
+        levelAfter: result.new_avatar_level || 0,
+        proofNumber: proofsSubmitted
+      }
+    });
+    localStorage.setItem('user', JSON.stringify(updatedUser));
     localStorage.setItem('proofsSubmittedCount', String(proofsSubmitted));
+
+    get().loadUnlockedCards();
+    get().fetchFeedPosts();
+    get().fetchMysteryBoxes();
+    // airtable-sync is deliberately not called here any more: it pushed the app-only
+    // 'doer-mvp1' key, which doesn't exist in the album.hrareality.cz Season 0 catalog.
+    // Re-enable once the app ↔ album card mapping is agreed.
 
     track('proof_submitted', {
       proof_number: proofsSubmitted,
-      node: u?.uzel,
+      node: u.uzel,
       is_public: proofData.is_public,
-      has_photo: !!proofData.photoFile
+      has_photo: !!proofData.photoFile,
+      already_completed: !!result.already_completed
     });
 
     set({ activeModal: 'success-overlay' });
+  },
+
+  // MVP1 spec-12 §2.1 "Za každý 3. klíč hráč získá mystery box". Boxes are granted
+  // server-side (grant_earned_mystery_boxes trigger); content comes from mystery_box_pool.
+  mysteryBoxes: [],
+  boxPool: [],
+
+  fetchMysteryBoxes: async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const [{ data: boxes, error: boxesError }, { data: pool, error: poolError }] = await Promise.all([
+        supabase.from('mystery_boxes').select('id, status, card_key, created_at').eq('user_id', session.user.id).eq('status', 'pending').order('created_at'),
+        supabase.from('mystery_box_pool').select('card_key, title, rarity, description')
+      ]);
+      if (!boxesError) set({ mysteryBoxes: boxes || [] });
+      if (!poolError) set({ boxPool: pool || [] });
+    } catch (e) {
+      console.warn('Failed to load mystery boxes.', e);
+    }
+  },
+
+  // Returns { card } or { error: 'empty' | 'failed' }.
+  openMysteryBox: async (boxId) => {
+    track('mystery_box_open_clicked', { box_id: boxId });
+    const { data, error } = await supabase.rpc('open_mystery_box', { p_box_id: boxId });
+    if (error) {
+      const empty = /pool is empty/i.test(error.message || '');
+      console.warn('open_mystery_box failed.', error);
+      return { error: empty ? 'empty' : 'failed' };
+    }
+    const card = Array.isArray(data) ? data[0] : data;
+    track('mystery_box_opened', { card_key: card?.card_key, rarity: card?.rarity });
+    set(state => ({ mysteryBoxes: state.mysteryBoxes.filter(b => b.id !== boxId) }));
+    get().loadUnlockedCards();
+    get().fetchFeedPosts();
+    return { card };
   },
 
   // useFreeDaily: explicit intent flag for "Pokračovat zdarma" on the paywall moment —
@@ -407,6 +406,14 @@ export const createGameplaySlice = (set, get) => ({
         return;
       }
 
+      // The server refuses to advance past a node whose challenge isn't completed yet —
+      // send the player back to that challenge instead of silently doing nothing.
+      if (result.status === 'challenge_required') {
+        track('node_challenge_required', { node: u.uzel });
+        set({ activeModal: 'challenge-detail' });
+        return;
+      }
+
       if (result.status === 'daily_limit_reached') {
         track('node_daily_limit_reached', { node: u.uzel });
         set({ activeModal: 'node-daily-limit' });
@@ -419,41 +426,12 @@ export const createGameplaySlice = (set, get) => ({
       track('node_completed', { node: result.new_uzel, via_free_daily: useFreeDaily });
       get().loadCurrentNodeData();
     } catch (e) {
-      // Same offline/demo-mode resilience as elsewhere: fall back to a local-only advance,
-      // not persisted server-side, using whatever node list the client already loaded.
-      console.warn('advance_node RPC failed, using local-only progression (not persisted).', e);
-      const allNodes = get().allStoryNodes;
-      const currentNode = allNodes.find(n => n.node_order === u.uzel);
-      const nextNode = allNodes.find(n => n.node_order === u.uzel + 1);
-
-      if (nextNode && nextNode.type === 'REFERENTIAL') {
-        handleSeasonCompleted();
-        return;
-      }
-      if (!nextNode && currentNode?.type === 'FINAL') {
-        handleSeasonCompleted();
-        return;
-      }
-
-      // Mirrors the real RPC's requires_pass gate — without this, the local-only fallback
-      // let a free player walk straight through paid content whenever the RPC call itself
-      // failed (network blip, or the request simply broken client-side). Doesn't replicate
-      // the 1-node/day free-allowance bookkeeping here — offline/demo mode just hard-gates
-      // like the rest of this fallback already does; the server remains the actual source
-      // of truth for `uzel` regardless (protect_profile_privileges locks it against direct
-      // writes), so this only affects the optimistic local UI, not real progression.
-      if (nextNode?.requires_pass && !u.passHolder && !useFreeDaily) {
-        track('node_gated_by_pass', { node: u.uzel, offline_fallback: true });
-        set({ activeModal: 'paywall' });
-        return;
-      }
-
-      const updatedNode = nextNode ? nextNode.node_order : Math.min(u.uzel + 1, 9);
-      const updated = { ...u, uzel: updatedNode };
-      set({ user: updated, activeModal: null });
-      localStorage.setItem('user', JSON.stringify(updated));
-      track('node_completed', { node: updatedNode, via_free_daily: useFreeDaily });
-      get().loadCurrentNodeData();
+      // No local-only advance any more: `uzel` is server-owned, so a faked step forward was
+      // silently reverted on the next load. Tell the player instead.
+      console.warn('advance_node RPC failed.', e);
+      track('node_advance_failed', { node: u.uzel, reason: String(e?.message || e) });
+      set({ activeModal: null });
+      alert('Posun do dalšího uzlu se nepodařilo uložit. Zkontroluj připojení a zkus to znovu.');
     }
   },
 
@@ -490,7 +468,9 @@ export const createGameplaySlice = (set, get) => ({
       const { count, error } = await supabase
         .from('referral_signups')
         .select('id', { count: 'exact', head: true })
-        .eq('referrer_id', session.user.id);
+        .eq('referrer_id', session.user.id)
+        // Only activated players count (first challenge completed) — handle_referral_activation().
+        .not('activated_at', 'is', null);
       if (!error) set({ referralSignupsCount: count ?? 0 });
     } catch (e) {
       console.warn('Failed to fetch referral stats.', e);

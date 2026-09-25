@@ -1,9 +1,9 @@
 import { useEffect, useState, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
-import { ALL_CARDS, isCardUnlocked } from '../lib/cards';
+import { buildCatalog, isCardUnlocked } from '../lib/cards';
 import { getAvatarLevel } from '../lib/avatarLevels';
-import { ArrowLeft, Lock, KeyRound, Zap, Check } from 'lucide-react';
+import { ArrowLeft, Lock, KeyRound, Zap, Check, Gift } from 'lucide-react';
 
 // "Inventář" (MVP1 spec-10) — the other half of the Profil/Inventář split: "PROFIL = co
 // ukazuju (výběr), INVENTÁŘ = co vlastním (celek)". A single component, not split into
@@ -17,7 +17,11 @@ export default function Inventory() {
     loadUnlockedCards,
     allStoryNodes,
     loadAllStoryNodes,
-    setShowcase
+    setShowcase,
+    mysteryBoxes,
+    boxPool,
+    fetchMysteryBoxes,
+    openModal
   } = useUserStore();
 
   const [saving, setSaving] = useState(false);
@@ -26,6 +30,7 @@ export default function Inventory() {
   useEffect(() => {
     if (unlockedCards.length === 0) loadUnlockedCards();
     if (allStoryNodes.length === 0) loadAllStoryNodes();
+    fetchMysteryBoxes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -33,8 +38,9 @@ export default function Inventory() {
     setPendingShowcase(user?.showcaseCardKeys || []);
   }, [user?.showcaseCardKeys]);
 
-  const ownedCards = ALL_CARDS.filter(c => isCardUnlocked(c, unlockedCards));
-  const lockedCards = ALL_CARDS.filter(c => !isCardUnlocked(c, unlockedCards));
+  const catalog = buildCatalog(boxPool);
+  const ownedCards = catalog.filter(c => isCardUnlocked(c, unlockedCards));
+  const lockedCards = catalog.filter(c => !isCardUnlocked(c, unlockedCards));
   const level = getAvatarLevel(user?.badges_count);
   const dirty = JSON.stringify([...pendingShowcase].sort()) !== JSON.stringify([...(user?.showcaseCardKeys || [])].sort());
 
@@ -107,11 +113,26 @@ export default function Inventory() {
         </div>
       </div>
 
+      {/* Mystery boxy (spec-12 §2.1: box za každý 3. klíč) */}
+      <button
+        onClick={() => openModal('mystery-box')}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '12px', width: '100%', marginTop: '14px', textAlign: 'left',
+          background: mysteryBoxes.length > 0 ? '#2A1E10' : '#1C1630',
+          border: `1px solid ${mysteryBoxes.length > 0 ? '#F5B73F' : '#382C5C'}`, borderRadius: '16px', padding: '12px 16px', cursor: 'pointer'
+        }}
+      >
+        <span style={{ color: '#F5B73F', display: 'inline-flex' }}><Gift size={22} /></span>
+        <span style={{ flex: 1, fontFamily: 'Inter', fontSize: '13px', color: '#F0F0F8' }}>
+          {mysteryBoxes.length > 0 ? `Mystery Boxy k otevření: ${mysteryBoxes.length}` : 'Mystery Box získáš za každé 3 klíče'}
+        </span>
+      </button>
+
       {/* SEKCE 2 — Karty */}
       <div style={{ marginTop: '26px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
           <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '11px', letterSpacing: '.1em', textTransform: 'uppercase', color: '#6B6B8A' }}>
-            Karty · {ownedCards.length}/{ALL_CARDS.length}
+            Karty · {ownedCards.length}/{catalog.length}
           </span>
           {dirty && (
             <button

@@ -49,7 +49,7 @@ VALUES
   'CHALLENGE', 
   'Uzel 4 · Hlas v Mrtvém Pásmu', 
   'Lidé zapomněli na reálné vazby. Pošli upřímnou zprávu starému příteli, se kterým jsi nemluvil přes 3 měsíce, nebo pozdrav člověka ve tvém okolí s očním kontaktem.', 
-  FALSE
+  TRUE
 ),
 (
   'n-node-5', 
@@ -94,7 +94,7 @@ VALUES
   'FINAL', 
   'Uzel 9 · Boss Fight: Prolomení Sítě ZAYA', 
   'Finální zkouška Season 0. Udělej celodenní reset: 24 hodin bez sociálních sítí, 10 000 kroků v reálu a splnění 1 dobrého skutku. Tímto dokončíš Season 0 a odemkneš kartu DOER MVP-1.', 
-  FALSE
+  TRUE
 ) ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, cutscene_text = EXCLUDED.cutscene_text, requires_pass = EXCLUDED.requires_pass;
 
 -- 3. Insert Challenges for Nodes

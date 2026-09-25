@@ -1,61 +1,6 @@
 import { supabase } from '../../api/supabaseClient';
 import { track } from '../../lib/analytics';
 
-export const DEFAULT_FEED = [
-  {
-    id: 'f1',
-    user_name: 'NeonLiška',
-    rarity: 'Rare',
-    type: 'PROOF',
-    content: 'Sebrala 3 kelímky 🟢',
-    reactions_fire: 34,
-    reactions_plant: 12,
-    reactions_lightning: 12,
-    reactions_eye: 84,
-    created_at: new Date(Date.now() - 600000).toISOString(),
-    is_public: true
-  },
-  {
-    id: 'f2',
-    user_name: 'RychlýDoer',
-    rarity: 'Rare',
-    type: 'PROOF',
-    content: 'Napsal kámošce po půl roce',
-    reactions_fire: 21,
-    reactions_plant: 5,
-    reactions_lightning: 5,
-    reactions_eye: 46,
-    created_at: new Date(Date.now() - 3600000).toISOString(),
-    is_public: true
-  },
-  {
-    id: 'f3',
-    user_name: 'Kometa',
-    rarity: 'Legendary',
-    // Demo variety only — real STATUS posts come from server-side triggers
-    // (submit_season_reflection(), handle_referral_signup(), stripe-webhook).
-    type: 'STATUS',
-    content: 'Dokončil jsem celou Season 0 a sejmul bossa! 👑',
-    reactions_fire: 120,
-    reactions_plant: 44,
-    reactions_lightning: 44,
-    reactions_eye: 382,
-    created_at: new Date(Date.now() - 7200000).toISOString(),
-    is_public: true
-  }
-];
-
-export const DEFAULT_LEADERBOARD = [
-  { id: 'u1', name: 'Kometa', rarity: 'Legendary', xp: 412, uzel: 9, badges_count: 10 },
-  { id: 'u2', name: 'Vlk_42', rarity: 'Rare', xp: 388, uzel: 8, badges_count: 8 },
-  { id: 'u3', name: 'NeonLiška', rarity: 'Rare', xp: 310, uzel: 6, badges_count: 6 },
-  { id: 'u4', name: 'RychlýDoer', rarity: 'Rare', xp: 285, uzel: 5, badges_count: 5 },
-  { id: 'u5', name: 'TemnýPozorovatel', rarity: 'Rare', xp: 240, uzel: 3, badges_count: 4, is_self: true },
-  { id: 'u6', name: 'GreenDoer', rarity: 'Common', xp: 180, uzel: 3, badges_count: 3 },
-  { id: 'u7', name: 'ActivePlayer', rarity: 'Common', xp: 150, uzel: 2, badges_count: 2 },
-  { id: 'u8', name: 'Shadow', rarity: 'Common', xp: 120, uzel: 2, badges_count: 2 }
-];
-
 export const createFeedSlice = (set, get) => {
   let feedChannel = null;
 
@@ -65,7 +10,10 @@ export const createFeedSlice = (set, get) => {
       feedChannel = supabase
         .channel('public:feed_posts')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'feed_posts' }, (payload) => {
+          // Admins can also receive non-public rows (their RLS policy sees everything) —
+          // the feed only ever shows public posts.
           if (payload.eventType === 'INSERT') {
+            if (!payload.new.is_public) return;
             const newItem = {
               id: payload.new.id,
               user_id: payload.new.user_id || null,
@@ -84,6 +32,11 @@ export const createFeedSlice = (set, get) => {
             };
             set(state => ({ feed: [newItem, ...state.feed.filter(x => x.id !== newItem.id)] }));
           } else if (payload.eventType === 'UPDATE') {
+            // Hidden by reports / moderation → drop it from the visible feed.
+            if (payload.new.is_public === false) {
+              set(state => ({ feed: state.feed.filter(item => item.id !== payload.new.id) }));
+              return;
+            }
             set(state => ({
               feed: state.feed.map(item => item.id === payload.new.id ? {
                 ...item,
@@ -104,8 +57,10 @@ export const createFeedSlice = (set, get) => {
   setupFeedRealtime();
 
   return {
-    feed: DEFAULT_FEED,
-    leaderboard: DEFAULT_LEADERBOARD,
+    // Real data only — an empty world renders an empty state, never demo players.
+    feed: [],
+    leaderboard: [],
+    weeklyTopDoers: null,
     // null = not loaded yet. Real social-proof copy (e.g. onboarding) must
     // render nothing rather than a fake/zero number while this is null.
     playerCount: null,
@@ -130,7 +85,7 @@ export const createFeedSlice = (set, get) => {
           .order('created_at', { ascending: false })
           .limit(50);
 
-        if (!error && data && data.length > 0) {
+        if (!error && data) {
           const mappedPosts = data.map(p => ({
             id: p.id,
             user_id: p.user_id || null,
@@ -158,22 +113,55 @@ export const createFeedSlice = (set, get) => {
       try {
         const { data, error } = await supabase.rpc('get_leaderboard', { p_limit: 20 });
 
-        if (!error && data && data.length > 0) {
-          const currentUser = get().user;
+        if (!error && data) {
           const mappedLeaderboard = data.map((p, idx) => ({
             id: p.id,
             name: p.display_name || `Hráč_${idx + 1}`,
             rarity: p.xp > 300 ? 'Legendary' : (p.xp > 100 ? 'Rare' : 'Common'),
             xp: p.xp || 0,
             uzel: p.uzel || 0,
-            badges_count: p.avatar_level || 1,
-            is_self: currentUser && currentUser.email === p.email
+            badges_count: p.avatar_level || 1
           }));
           set({ leaderboard: mappedLeaderboard });
         }
       } catch (e) {
         console.warn('Failed to fetch real leaderboard from Supabase.', e);
       }
+    },
+
+    // MVP1 spec-12 §5.3 "Top Doers this week" — 5 players by XP earned since Monday.
+    fetchWeeklyTopDoers: async () => {
+      try {
+        const { data, error } = await supabase.rpc('get_weekly_top_doers', { p_limit: 5 });
+        if (!error && data) {
+          set({
+            weeklyTopDoers: data.map((p, idx) => ({
+              id: p.id,
+              name: p.display_name || `Hráč_${idx + 1}`,
+              xp: p.week_xp || 0,
+              completions: p.week_completions || 0,
+              badges_count: p.avatar_level || 1,
+              passHolder: !!p.pass_holder
+            }))
+          });
+        }
+      } catch (e) {
+        console.warn('Failed to fetch weekly top doers.', e);
+      }
+    },
+
+    // Report → server records it; three distinct reporters hide the post pending admin review.
+    reportPost: async (postId, reason) => {
+      track('post_reported', { post_id: postId, reason });
+      const { data, error } = await supabase.rpc('report_post', { p_post_id: postId, p_reason: reason });
+      if (error) {
+        console.warn('report_post failed.', error);
+        return { success: false };
+      }
+      if (data === true) {
+        set(state => ({ feed: state.feed.filter(item => item.id !== postId) }));
+      }
+      return { success: true, hidden: data === true };
     },
 
     addReaction: async (postId, type) => {

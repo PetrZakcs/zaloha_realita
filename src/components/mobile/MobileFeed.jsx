@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { track } from '../../lib/analytics';
 import { buildReferralLink, shareContent } from '../../lib/share';
+import ReportButton from '../common/ReportButton';
 import { SlidersHorizontal, Shield, Crown, Flame, Sprout, Eye, Share2, ImageIcon, ChevronRight, ArrowRight } from 'lucide-react';
 
 export default function MobileFeed() {
@@ -51,8 +52,8 @@ export default function MobileFeed() {
   }, []);
 
   const filteredFeed = feed.filter(post => {
-    if (filter === 'doers') return post.rarity !== 'Common';
-    if (filter === 'nearby') return post.id === 'f1'; // mock nearby
+    if (filter === 'proofs') return post.type === 'PROOF';
+    if (filter === 'founders') return post.author_pass_holder;
     return true;
   });
 
@@ -82,6 +83,7 @@ export default function MobileFeed() {
       <span onClick={() => handleShareProof(post)} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#F0F0F8', cursor: 'pointer' }}>
         <span style={{ display: 'inline-flex', width: '16px', height: '16px' }}><Share2 size={14} /></span>Sdílet
       </span>
+      <ReportButton post={post} />
     </div>
   );
 
@@ -171,8 +173,8 @@ export default function MobileFeed() {
       <div style={{ display: 'flex', gap: '8px', paddingBottom: '4px', flexShrink: 0 }}>
         {[
           { key: 'all', label: 'Vše' },
-          { key: 'doers', label: 'Doeři' },
-          { key: 'nearby', label: 'V okolí' }
+          { key: 'proofs', label: 'Důkazy' },
+          { key: 'founders', label: 'Founder' }
         ].map(tab => {
           const active = filter === tab.key;
           return (

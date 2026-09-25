@@ -30,29 +30,15 @@ import { track } from '../../lib/analytics';
 export const MOBILE_ONBOARDING_STEPS = ['entry', 'first-reward', 'login', 'avatar-upgrade', 'mystery-box', 'slib', 'reward2'];
 export const DESKTOP_ONBOARDING_STEPS = ['entry', 'first-reward', 'login', 'avatar-upgrade', 'mystery-box', 'slib', 'reward2', 'install'];
 
-// Discord's real user id (a "snowflake") is what airtable-sync actually needs — it's the
-// join key for the Airtable rewards sync (submitProof() in gameplaySlice.js only fires that
-// call when discord_user_id is set). Root-caused: this used to just be forwarded from
-// whatever local optimistic user object was lying around (always null — nothing ever set
-// it from a real session), so the Airtable sync silently never fired for ANY Discord
-// signup, deployed edge function or not. Supabase doesn't document one single field name
-// for the raw provider id across OAuth providers, so this tries the identities array
-// (identity_data carries the provider's own profile payload) before falling back to
-// user_metadata. NOT verified against a live Discord login in this environment — the
-// console.log below is there specifically so the first real Discord sign-in after this
-// change can confirm which field it actually landed in; adjust the priority if needed.
-function extractDiscordUserId(session) {
-  if (session.user.app_metadata?.provider !== 'discord') return null;
-  const discordIdentity = session.user.identities?.find(i => i.provider === 'discord');
-  const meta = session.user.user_metadata || {};
-  const id = discordIdentity?.identity_data?.provider_id
-    || discordIdentity?.identity_data?.sub
-    || discordIdentity?.identity_data?.id
-    || meta.provider_id
-    || meta.sub
-    || null;
-  console.log('[Auth] extractDiscordUserId:', { id, identity_data: discordIdentity?.identity_data, user_metadata: meta });
-  return id;
+// Discord's real user id (a "snowflake") is what airtable-sync needs as the join key for
+// the Airtable rewards sync. It's resolved server-side by the sync_discord_identity() RPC
+// from the verified Discord identity in auth.identities — the client can't write
+// profiles.discord_user_id directly any more (protect_profile_privileges locks it), since a
+// client-supplied id let any player attribute cards to someone else's Airtable record.
+async function syncDiscordIdentity(session) {
+  if (session.user.app_metadata?.provider !== 'discord') return;
+  const { error } = await supabase.rpc('sync_discord_identity');
+  if (error) console.warn('[Auth] sync_discord_identity failed:', error.message);
 }
 
 // Translates the handful of Supabase auth errors we actually expect to hit
@@ -207,8 +193,7 @@ export const createAuthSlice = (set, get) => {
           // no-op anyway — removed proactively instead of left to fail.
           await supabase.from('profiles').update({
             display_name: updated.name,
-            pledge: updated.pledge,
-            discord_user_id: updated.discord_user_id
+            pledge: updated.pledge
           }).eq('id', session.user.id);
         }
       } catch (e) {
@@ -419,14 +404,9 @@ export const createAuthSlice = (set, get) => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
-          const u = get().user;
-          const { error } = await supabase.from('feed_posts').insert([{
-            user_id: session.user.id,
-            user_name: u?.name || DEFAULT_USER.name,
-            type: 'STATUS',
-            content: pledgeText,
-            is_public: true
-          }]);
+          // publish_pledge() writes the post server-side with the profile's real name —
+          // feed_posts no longer accepts direct client INSERTs.
+          const { error } = await supabase.rpc('publish_pledge', { p_text: pledgeText });
           if (error) throw error;
           get().fetchFeedPosts();
         }
@@ -464,38 +444,21 @@ export const createAuthSlice = (set, get) => {
       try {
         const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
         if (data) {
-          // Calculate streak from last_active_at
+          // Streak + last_active_at are computed server-side by record_daily_activity()
+          // (the client used to compute the streak and write it straight to profiles).
+          // It's a no-op on repeat calls within the same UTC day.
           let calculatedStreak = data.current_streak || 1;
-          const todayStr = new Date().toISOString().slice(0, 10);
-          const lastActiveStr = data.last_active_at ? new Date(data.last_active_at).toISOString().slice(0, 10) : null;
-
-          if (lastActiveStr && lastActiveStr !== todayStr) {
-            const yesterday = new Date();
-            yesterday.setDate(yesterday.getDate() - 1);
-            const yesterdayStr = yesterday.toISOString().slice(0, 10);
-
-            if (lastActiveStr === yesterdayStr) {
-              calculatedStreak += 1;
-            } else {
-              calculatedStreak = 1;
-            }
-
-            // Sync updated streak & last_active_at back to Supabase
-            await supabase.from('profiles').update({
-              current_streak: calculatedStreak,
-              last_active_at: new Date().toISOString()
-            }).eq('id', userId);
-
-            // MVP1 spec-3 §14C "D1 hook uvnitř appky" / spec-8 §7 "Po 48h neaktivity" —
-            // both are the same underlying moment (a return session after a calendar-day
-            // gap), just different copy by how many days it's been. This whole block only
-            // runs once per day-boundary crossing (guarded by lastActiveStr !== todayStr
-            // above), so welcomeBackDays only ever gets set once per actual return, not on
-            // every reload within the same day. Calendar-day diff (not raw ms/24h) to match
-            // the streak logic above and avoid a near-midnight session miscounting by a day.
-            const daysSinceLastActive = Math.round((new Date(todayStr) - new Date(lastActiveStr)) / 86400000);
-            if (daysSinceLastActive >= 1 && !get().activeModal) {
-              set({ welcomeBackDays: daysSinceLastActive, activeModal: 'welcome-back' });
+          const { data: activity, error: activityError } = await supabase.rpc('record_daily_activity');
+          const activityRow = Array.isArray(activity) ? activity[0] : activity;
+          if (activityError) {
+            console.warn('record_daily_activity failed.', activityError);
+          } else if (activityRow) {
+            calculatedStreak = activityRow.current_streak;
+            // MVP1 spec-3 §14C "D1 hook uvnitř appky" / spec-8 §7 "Po 48h neaktivity" — a
+            // return session after a calendar-day gap. The RPC only reports a gap on the
+            // first call of the day, so this fires once per actual return.
+            if (activityRow.days_since_last_active >= 1 && !get().activeModal) {
+              set({ welcomeBackDays: activityRow.days_since_last_active, activeModal: 'welcome-back' });
             }
           }
 
@@ -530,6 +493,7 @@ export const createAuthSlice = (set, get) => {
           // supabase_migration_season_reflection.sql.
           get().checkSeasonReflectionStatus();
           get().fetchReferralStats();
+          get().fetchMysteryBoxes();
         }
       } catch (e) {
         console.warn('Supabase fetchUser failed, using local storage.');
@@ -588,19 +552,10 @@ export const createAuthSlice = (set, get) => {
 
         if (profileRow) {
           console.log('[Auth] Profile found → calling fetchUser');
-          // Backfill discord_user_id for accounts created before this was ever captured
-          // correctly (i.e. everyone who signed up via Discord until now) — every future
-          // Discord login is a free chance to pick it up without a migration.
+          // Backfill discord_user_id for accounts created before it was ever captured —
+          // every Discord login is a free chance to pick it up without a migration.
           if (!profileRow.discord_user_id) {
-            const discordUserId = extractDiscordUserId(session);
-            if (discordUserId) {
-              const { error: backfillError } = await supabase
-                .from('profiles')
-                .update({ discord_user_id: discordUserId })
-                .eq('id', userId);
-              if (backfillError) console.warn('[Auth] discord_user_id backfill failed:', backfillError.message);
-              else console.log('[Auth] discord_user_id backfilled:', discordUserId);
-            }
+            await syncDiscordIdentity(session);
           }
           await get().fetchUser(userId);
           return;
@@ -618,7 +573,6 @@ export const createAuthSlice = (set, get) => {
           ? (meta.full_name || meta.name || meta.preferred_username || meta.custom_claims?.global_name || null)
           : null;
         let attemptName = discordName || u.name || DEFAULT_USER.name;
-        const discordUserId = extractDiscordUserId(session);
         // Captured on first app load from ?ref=CODE (see App.jsx) and, per that comment,
         // may have been sitting in localStorage since a completely different page load
         // (OAuth consent screen, email confirmation link). Only ever benefits the
@@ -639,12 +593,12 @@ export const createAuthSlice = (set, get) => {
             avatar_level: u.badges_count ?? 0,
             pledge: u.pledge || DEFAULT_USER.pledge,
             pass_holder: u.passHolder || false,
-            discord_user_id: discordUserId,
             referred_by_code: referredByCode
           }]);
           if (!error) {
             console.log('[Auth] INSERT success');
             localStorage.removeItem('pendingReferralCode');
+            await syncDiscordIdentity(session);
             break;
           }
 

@@ -6,8 +6,8 @@ import { useUserStore } from '../userStore';
 // — JWT race + INSERT fallback"), and none of them had a test until now:
 //   1. generateRandomName()'s collision-retry path (private — exercised indirectly through
 //      handleOAuthSession's INSERT retry loop, since it's not exported).
-//   2. extractDiscordUserId()'s priority order over a realistic identities[] payload
-//      (also private — exercised through the discord_user_id backfill branch).
+//   2. The discord_user_id backfill branch — now resolved server-side by the
+//      sync_discord_identity() RPC instead of the client writing the id itself.
 //   3. handleOAuthSession()'s INSERT-fails-for-a-non-collision-reason fallback to fetchUser().
 //
 // mockMaybeSingle/mockSingle/mockInsert/mockUpdateEq are declared with the jest.mock()-required
@@ -17,6 +17,7 @@ let mockMaybeSingle = jest.fn(() => Promise.resolve({ data: null, error: null })
 let mockSingle = jest.fn(() => Promise.resolve({ data: null, error: null }));
 let mockInsert = jest.fn(() => Promise.resolve({ error: null }));
 let mockUpdateEq = jest.fn(() => Promise.resolve({ error: null }));
+let mockRpc = jest.fn(() => Promise.resolve({ data: null, error: null }));
 
 jest.mock('../../api/supabaseClient', () => {
   function genericChain(resolvedValue) {
@@ -56,7 +57,7 @@ jest.mock('../../api/supabaseClient', () => {
         }
         return genericChain({ data: [], error: null });
       },
-      rpc: () => Promise.resolve({ data: null, error: null }),
+      rpc: (...args) => mockRpc(...args),
       channel: () => genericChain({ data: null, error: null }),
       removeChannel: () => {},
       storage: { from: () => genericChain({ data: null, error: null }) },
@@ -73,6 +74,7 @@ beforeEach(() => {
   mockSingle.mockReset().mockResolvedValue({ data: null, error: null });
   mockInsert.mockReset().mockResolvedValue({ error: null });
   mockUpdateEq.mockReset().mockResolvedValue({ error: null });
+  mockRpc.mockReset().mockResolvedValue({ data: null, error: null });
 });
 
 function fakeSession({ provider = null, identities = [], userMetadata = {} } = {}) {
@@ -149,7 +151,7 @@ test('INSERT fails for a non-collision reason: falls back to fetchUser instead o
   expect(useUserStore.getState().user.name).toBe('RecoveredPlayer');
 });
 
-test('discord backfill: extracts the provider id from identities[].identity_data over an existing profile', async () => {
+test('discord backfill: an existing Discord profile without discord_user_id asks the server to sync it', async () => {
   const row = { id: 'user-123', display_name: 'DiscordPlayer', xp: 0, keys_balance: 1, avatar_level: 0, discord_user_id: null };
   mockMaybeSingle.mockResolvedValue({ data: row, error: null });
   mockSingle.mockResolvedValue({ data: row, error: null });
@@ -161,9 +163,21 @@ test('discord backfill: extracts the provider id from identities[].identity_data
 
   await useUserStore.getState().handleOAuthSession(session);
 
-  expect(mockUpdateEq).toHaveBeenCalledWith(
-    { discord_user_id: '881234567890123456' },
-    'id',
-    'user-123'
+  expect(mockRpc).toHaveBeenCalledWith('sync_discord_identity');
+  // The client must never write discord_user_id itself (protect_profile_privileges locks it).
+  expect(mockUpdateEq).not.toHaveBeenCalledWith(
+    expect.objectContaining({ discord_user_id: expect.anything() }),
+    expect.anything(),
+    expect.anything()
   );
+});
+
+test('non-Discord login never calls sync_discord_identity', async () => {
+  const row = { id: 'user-123', display_name: 'EmailPlayer', xp: 0, keys_balance: 1, avatar_level: 0, discord_user_id: null };
+  mockMaybeSingle.mockResolvedValue({ data: row, error: null });
+  mockSingle.mockResolvedValue({ data: row, error: null });
+
+  await useUserStore.getState().handleOAuthSession(fakeSession());
+
+  expect(mockRpc).not.toHaveBeenCalledWith('sync_discord_identity');
 });

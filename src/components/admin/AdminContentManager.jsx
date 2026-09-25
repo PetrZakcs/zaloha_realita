@@ -56,10 +56,15 @@ export default function AdminContentManager({ onClose }) {
       } else if (activeTab === 'moderation') {
         const { data, error } = await supabase
           .from('feed_posts')
-          .select('*')
+          .select('*, feed_reports(reason)')
           .order('created_at', { ascending: false });
         if (error) throw error;
-        setPosts(data || []);
+        // Reported posts first (hidden-by-reports on top), then newest.
+        const withReports = (data || []).map(p => ({ ...p, reports: p.feed_reports || [] }));
+        withReports.sort((a, b) =>
+          (Number(b.hidden_by_reports) - Number(a.hidden_by_reports)) || (b.reports.length - a.reports.length)
+        );
+        setPosts(withReports);
       }
     } catch (e) {
       console.error(`Failed fetching data for tab ${activeTab}:`, e);
@@ -218,13 +223,21 @@ export default function AdminContentManager({ onClose }) {
   const handleTogglePostPublic = async (post) => {
     try {
       const nextPublic = !post.is_public;
+      // Restoring a post that reports hid clears the reports too (reviewed and approved).
+      const restoringReported = nextPublic && post.hidden_by_reports;
       const { error } = await supabase
         .from('feed_posts')
-        .update({ is_public: nextPublic })
+        .update(restoringReported ? { is_public: true, hidden_by_reports: false } : { is_public: nextPublic })
         .eq('id', post.id);
 
       if (error) throw error;
-      setPosts(posts.map(p => p.id === post.id ? { ...p, is_public: nextPublic } : p));
+      if (restoringReported) {
+        const { error: reportsError } = await supabase.from('feed_reports').delete().eq('post_id', post.id);
+        if (reportsError) throw reportsError;
+      }
+      setPosts(posts.map(p => p.id === post.id
+        ? { ...p, is_public: nextPublic, ...(restoringReported ? { hidden_by_reports: false, reports: [] } : {}) }
+        : p));
     } catch (e) {
       alert('Nepodařilo se změnit viditelnost příspěvku: ' + e.message);
     }
@@ -977,6 +990,19 @@ export default function AdminContentManager({ onClose }) {
                         {new Date(post.created_at).toLocaleDateString('cs-CZ')}
                       </span>
                     </div>
+                    {post.reports.length > 0 && (
+                      <div style={{ fontFamily: 'Inter', fontSize: '11.5px', color: '#EF4444', background: 'rgba(239,68,68,.1)', borderRadius: '8px', padding: '6px 10px', marginBottom: '10px' }}>
+                        ⚠ {post.reports.length}× nahlášeno ({[...new Set(post.reports.map(r => r.reason))].join(', ')})
+                        {post.hidden_by_reports && ' · skryto do kontroly'}
+                      </div>
+                    )}
+                    {post.image_url && (
+                      <img
+                        src={post.image_url}
+                        alt={`Důkaz od ${post.user_name}`}
+                        style={{ width: '100%', maxHeight: '220px', objectFit: 'cover', borderRadius: '10px', marginBottom: '10px' }}
+                      />
+                    )}
                     <p style={{ fontFamily: 'Inter', fontSize: '13px', color: '#F0F0F8', lineHeight: '1.5', margin: '0 0 16px 0' }}>
                       {post.content}
                     </p>

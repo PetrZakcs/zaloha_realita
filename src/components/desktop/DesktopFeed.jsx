@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { track } from '../../lib/analytics';
 import { buildReferralLink, shareContent } from '../../lib/share';
+import ReportButton from '../common/ReportButton';
 import { Flame, Sprout, Eye, Share2, ImageIcon, Plus, Crown, ArrowRight } from 'lucide-react';
 
 export default function DesktopFeed() {
@@ -52,7 +53,8 @@ export default function DesktopFeed() {
   };
 
   const filteredFeed = feed.filter(post => {
-    if (filter === 'doers') return post.rarity !== 'Common';
+    if (filter === 'proofs') return post.type === 'PROOF';
+    if (filter === 'founders') return post.author_pass_holder;
     return true;
   });
 
@@ -80,8 +82,8 @@ export default function DesktopFeed() {
         <div style={{ display: 'flex', gap: '8px', marginLeft: '8px' }}>
           {[
             { key: 'all', label: 'Vše' },
-            { key: 'doers', label: 'Doeři' },
-            { key: 'nearby', label: 'V okolí' }
+            { key: 'proofs', label: 'Důkazy' },
+            { key: 'founders', label: 'Founder' }
           ].map(tab => {
             const active = filter === tab.key;
             return (
@@ -302,6 +304,7 @@ export default function DesktopFeed() {
                       >
                         <span style={{ display: 'inline-flex', width: '14px', height: '14px' }}><Share2 size={14} /></span>
                       </span>
+                      <ReportButton post={post} />
                     </div>
                   )}
                 </div>

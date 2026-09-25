@@ -5,13 +5,20 @@ import { supabase } from '../api/supabaseClient';
 import { track } from '../lib/analytics';
 import { buildReferralLink, shareContent } from '../lib/share';
 import { ALL_CARDS, isCardUnlocked } from '../lib/cards';
+import { keysLabel } from '../lib/plural';
+import { getAvatarLevel } from '../lib/avatarLevels';
+import MysteryBoxModal from './modals/MysteryBoxModal';
 import { getPushStatus, subscribeToPush, unsubscribeFromPush } from '../lib/push';
+import { startCheckout } from '../lib/checkout';
 import {
   X, Check, KeyRound, Lock, Crown, ArrowRight, Shield, Zap,
   ImageIcon, Globe, Bell, Sparkles, Loader2, Volume2, Clock, Share2, Users, Sunrise
 } from 'lucide-react';
 import OnboardingFlow from './modals/OnboardingFlow';
 import SeasonReflectionFlow from './modals/SeasonReflectionFlow';
+
+const YEARLY_PASS_ENABLED = process.env.REACT_APP_PASS_YEARLY_ENABLED === 'true';
+const DISCORD_INVITE_URL = process.env.REACT_APP_DISCORD_INVITE_URL || '';
 
 export default function ModalManager() {
   const navigate = useNavigate();
@@ -34,13 +41,16 @@ export default function ModalManager() {
     referralSignupsCount,
     fetchReferralStats,
     changeDisplayNameOnce,
-    welcomeBackDays
+    welcomeBackDays,
+    proofError,
+    lastReward,
+    mysteryBoxes
   } = useUserStore();
 
   // Onboarding text states
   const [tempName, setTempName] = useState(user?.name || 'TemnýPozorovatel');
   const [tempPledge, setTempPledge] = useState('Jsem člověk, co přestal čekat a začal jednat.');
-  const [textProof, setTextProof] = useState('Posbíral jsem odpadky u zastávky. Reálný zásah ✊');
+  const [textProof, setTextProof] = useState('');
   const [publicToggle, setPublicToggle] = useState(false);
   const [proofMode, setProofMode] = useState('photo'); // 'photo' | 'text'
   const [photoFile, setPhotoFile] = useState(null);
@@ -48,6 +58,29 @@ export default function ModalManager() {
   const [referralShareState, setReferralShareState] = useState('idle'); // 'idle' | 'copied'
   const [pushStatus, setPushStatus] = useState('not-subscribed'); // see src/lib/push.js getPushStatus()
   const [pushBusy, setPushBusy] = useState(false);
+  const [passPlan, setPassPlan] = useState('monthly'); // 'monthly' | 'yearly'
+  const [portalBusy, setPortalBusy] = useState(false);
+
+  // "Zrušíš kdykoliv" — Stripe Customer Portal via the stripe-portal edge function.
+  const openBillingPortal = async () => {
+    setPortalBusy(true);
+    track('billing_portal_opened');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('No session');
+      const response = await fetch(`${process.env.REACT_APP_SUPABASE_URL}/functions/v1/stripe-portal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }
+      });
+      const resData = await response.json();
+      if (!resData.url) throw new Error(resData.error || 'Portal unavailable');
+      window.location.href = resData.url;
+    } catch (e) {
+      console.warn('Billing portal failed.', e);
+      alert('Správu předplatného se nepodařilo otevřít. Zkus to prosím později.');
+      setPortalBusy(false);
+    }
+  };
 
   // Sync temp name when user store updates
   useEffect(() => {
@@ -60,8 +93,8 @@ export default function ModalManager() {
   const [xpDisplay, setXpDisplay] = useState(0);
   useEffect(() => {
     if (activeModal === 'celebration-xp' || activeModal === 'success-overlay') {
-      const target = user?.xp || 240;
-      const start = target - 50;
+      const target = user?.xp || 0;
+      const start = Math.max(0, target - (lastReward?.xpGained || 0));
       setXpDisplay(start);
       let current = start;
       const timer = setInterval(() => {
@@ -74,7 +107,7 @@ export default function ModalManager() {
       }, 30);
       return () => clearInterval(timer);
     }
-  }, [activeModal, user?.xp]);
+  }, [activeModal, user?.xp, lastReward?.xpGained]);
 
   // Referral count/link is shown in both the paywall's earn-to-unlock CTA and Settings —
   // refresh it whenever either opens instead of only once at login, so a milestone reward
@@ -472,6 +505,12 @@ export default function ModalManager() {
               </button>
             </div>
 
+            {proofError && (
+              <div role="alert" style={{ fontFamily: 'Inter', fontSize: '12px', color: '#EF4444', background: 'rgba(239,68,68,.1)', borderRadius: '10px', padding: '8px 12px', marginTop: '12px' }}>
+                {proofError}
+              </div>
+            )}
+
             <button
               disabled={proofMode === 'photo' ? !photoFile : !textProof.trim()}
               onClick={() => {
@@ -597,6 +636,8 @@ export default function ModalManager() {
           </div>
         )}
 
+        {activeModal === 'mystery-box' && <MysteryBoxModal />}
+
         {/* MODAL 4: Success Overlay */}
         {activeModal === 'success-overlay' && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
@@ -604,10 +645,12 @@ export default function ModalManager() {
               <Check size={48} style={{ filter: 'drop-shadow(0 0 10px rgba(34,197,94,.5))' }} />
             </span>
             <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '24px', color: '#fff' }}>
-              Zásah ověřen!
+              {lastReward?.alreadyCompleted ? 'Tuhle výzvu už máš splněnou' : 'Zásah zapsán!'}
             </div>
             <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', marginTop: '6px' }}>
-              Zaya potvrdila reálný dopad tvého činu. Jsi o krok dál.
+              {lastReward?.alreadyCompleted
+                ? 'Odměna se za stejnou výzvu nepřipisuje dvakrát. Můžeš pokračovat dál.'
+                : 'Tvůj důkaz je uložený ve světě Hry Reality. Jsi o krok dál.'}
             </div>
             <button 
               onClick={() => openModal('celebration-xp')}
@@ -644,7 +687,7 @@ export default function ModalManager() {
               textShadow: '0 0 20px rgba(74,168,255,.8), 0 0 40px rgba(59,130,246,.5)',
               margin: '12px 0 6px'
             }}>
-              +50
+              +{lastReward?.xpGained ?? 0}
             </div>
             <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5' }}>
               Nové skóre: <span style={{ color: '#fff', fontWeight: 'bold' }}>{xpDisplay} XP</span>
@@ -652,11 +695,11 @@ export default function ModalManager() {
 
             <button 
               onClick={() => {
-                // If it is the first upload, proceed to badge. Else, directly to keys
-                if (user?.badges_count === 1) {
-                  openModal('celebration-keys');
-                } else {
+                // Level-up screen only when the avatar level actually went up.
+                if ((lastReward?.levelAfter || 0) > (lastReward?.levelBefore || 0)) {
                   openModal('celebration-badge');
+                } else {
+                  openModal('celebration-keys');
                 }
               }}
               style={{
@@ -682,7 +725,7 @@ export default function ModalManager() {
         {activeModal === 'celebration-badge' && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', letterSpacing: '.12em', color: '#A78BFA', textTransform: 'uppercase' }}>
-              Nový odznak odemčen!
+              Tvůj avatar se posunul!
             </div>
             
             {/* Rarity Ring animation */}
@@ -704,10 +747,10 @@ export default function ModalManager() {
             </div>
 
             <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '22px', color: '#fff' }}>
-              Doer
+              {getAvatarLevel(lastReward?.levelAfter).name}
             </div>
             <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', letterSpacing: '.1em', textTransform: 'uppercase', color: '#A78BFA', border: '1px solid #A78BFA', borderRadius: '20px', padding: '3px 11px', marginTop: '6px' }}>
-              Rare
+              Úroveň {lastReward?.levelAfter ?? 0}
             </div>
             <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', marginTop: '14px', lineHeight: '1.5' }}>
               Každý, kdo jedná, už není NPC. Tento odznak to dokazuje.
@@ -738,7 +781,7 @@ export default function ModalManager() {
         {activeModal === 'celebration-keys' && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', letterSpacing: '.12em', color: '#F5B73F', textTransform: 'uppercase' }}>
-              Klíče připsány
+              {(lastReward?.keysGained || 0) > 0 ? 'Klíče připsány' : 'Soukromý důkaz'}
             </div>
 
             {/* Key Flip block */}
@@ -760,15 +803,44 @@ export default function ModalManager() {
             </div>
 
             <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '26px', color: '#F5B73F' }}>
-              +2 Klíče
+              {(lastReward?.keysGained || 0) > 0 ? `+${keysLabel(lastReward.keysGained)}` : 'Bez klíče'}
             </div>
-            
+            {(lastReward?.keysGained || 0) === 0 && !lastReward?.alreadyCompleted && (
+              <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#9A9AB5', marginTop: '6px' }}>
+                Klíč dostáváš za veřejný důkaz ve feedu.
+              </div>
+            )}
+
             <div style={{ width: '100%', background: '#1C1630', border: '0.5px solid #382C5C', borderRadius: '14px', padding: '10px', marginTop: '16px', textAlign: 'center' }}>
-              <div style={{ fontFamily: 'Inter', fontSize: '10px', color: '#6B6B8A' }}>Celkem ve sbírce</div>
+              <div style={{ fontFamily: 'Inter', fontSize: '10px', color: '#6B6B8A' }}>Celkem</div>
               <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', color: '#F5B73F', marginTop: '2px' }}>
-                {user?.keys_count || 7} klíčů
+                {keysLabel(user?.keys_count ?? 0)}
               </div>
             </div>
+
+            {mysteryBoxes.length > 0 && (
+              <button
+                onClick={() => openModal('mystery-box')}
+                style={{ width: '100%', height: '42px', background: 'transparent', color: '#F5B73F', fontFamily: 'Inter', fontWeight: 700, fontSize: '14px', border: '1.5px solid #F5B73F', borderRadius: '14px', cursor: 'pointer', marginTop: '14px' }}
+              >
+                🎁 Máš {mysteryBoxes.length === 1 ? 'nový Mystery Box' : `${mysteryBoxes.length} Mystery Boxy`} — otevřít
+              </button>
+            )}
+
+            {/* spec-18 MOMENT 2 (3rd proof) and spec-19 §6 (5th proof) behaviour triggers */}
+            {lastReward?.proofNumber === 3 && !user?.passHolder && (
+              <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#A78BFA', marginTop: '14px', lineHeight: 1.5 }}>
+                Vidíme, že to bereš vážně. Pozvi 2 hráče a další vrstvu odemkneš okamžitě.
+              </div>
+            )}
+            {lastReward?.proofNumber === 5 && !user?.passHolder && (
+              <button
+                onClick={() => { track('paywall_opened', { source: 'fifth_proof_trigger' }); openModal('paywall'); }}
+                style={{ background: 'none', border: 'none', fontFamily: 'Inter', fontSize: '12px', color: '#F5B73F', marginTop: '14px', cursor: 'pointer', lineHeight: 1.5 }}
+              >
+                Vidíme, že to bereš vážně. Founder Pass ti odemkne plnou sezónu →
+              </button>
+            )}
 
             <button
               onClick={() => {
@@ -846,57 +918,40 @@ export default function ModalManager() {
               padding: '14px',
               marginTop: '18px'
             }}>
-              <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F5B73F' }}>Měsíční členství</div>
+              {/* Roční varianta (spec-20: 999 Kč/rok) se zobrazí až po nastavení
+                  REACT_APP_PASS_YEARLY_ENABLED=true + STRIPE_PRICE_ID_YEARLY v stripe-checkout. */}
+              {YEARLY_PASS_ENABLED && (
+                <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', marginBottom: '10px' }}>
+                  {[{ key: 'monthly', label: 'Měsíčně' }, { key: 'yearly', label: 'Ročně' }].map(opt => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => setPassPlan(opt.key)}
+                      style={{
+                        fontFamily: 'Inter', fontWeight: 600, fontSize: '12px', borderRadius: '20px', padding: '5px 14px', cursor: 'pointer',
+                        background: passPlan === opt.key ? '#F5B73F' : 'transparent', color: passPlan === opt.key ? '#15111E' : '#F5B73F',
+                        border: '1px solid #F5B73F'
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F5B73F' }}>{passPlan === 'yearly' ? 'Roční členství' : 'Měsíční členství'}</div>
               <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '26px', color: '#fff', marginTop: '4px' }}>
-                149 Kč <span style={{ fontSize: '14px', color: '#9A9AB5', fontWeight: '500' }}>/ měsíc</span>
+                {passPlan === 'yearly' ? '999 Kč' : '149 Kč'} <span style={{ fontSize: '14px', color: '#9A9AB5', fontWeight: '500' }}>{passPlan === 'yearly' ? '/ rok' : '/ měsíc'}</span>
               </div>
-              {/* TODO(klient): roční varianta — čeká na cenu a Stripe price ID od klienta.
-                  Až budou známé, přidat sem přepínač Měsíčně/Ročně a druhý priceId níže. */}
+              <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#9A9AB5', marginTop: '4px' }}>Zrušíš kdykoliv v Nastavení.</div>
             </div>
 
             <button
               onClick={async () => {
-                track('pass_checkout_started');
-                try {
-                  const { data: { session } } = await supabase.auth.getSession();
-                  if (!session) {
-                    track('pass_checkout_blocked', { reason: 'no_session' });
-                    alert('Pro aktivaci Hra Passu se prosím nejdřív přihlas.');
-                    closeModal();
-                    return;
-                  }
-
-                  const response = await fetch(`${process.env.REACT_APP_SUPABASE_URL}/functions/v1/stripe-checkout`, {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'Authorization': `Bearer ${process.env.REACT_APP_SUPABASE_ANON_KEY}`
-                    },
-                    body: JSON.stringify({
-                      // Potvrzeno klientem: měsíční předplatné 149 Kč/měsíc. REACT_APP_STRIPE_PRICE_ID
-                      // musí ukazovat na odpovídající recurring Price v produkčním Stripe účtu.
-                      // Roční varianta (druhý priceId) čeká na cenu od klienta — viz TODO výše
-                      // u přepínače Měsíčně/Ročně.
-                      priceId: process.env.REACT_APP_STRIPE_PRICE_ID || 'price_mock_founder_pass',
-                      userId: session.user.id,
-                      email: session.user.email,
-                      type: 'SUBSCRIPTION',
-                      successUrl: window.location.origin + '?payment=success',
-                      cancelUrl: window.location.origin + '?payment=cancel'
-                    })
-                  });
-
-                  const resData = await response.json();
-                  if (resData.sessionUrl) {
-                    window.location.href = resData.sessionUrl;
-                  } else {
-                    throw new Error(resData.error || 'Platební bránu se nepodařilo inicializovat.');
-                  }
-                } catch (err) {
-                  // No fail-open free grant here: pass_holder is set ONLY by the
-                  // stripe-webhook edge function after a real, verified payment.
-                  console.warn('Stripe checkout call failed.', err);
-                  track('pass_checkout_failed', { error: String(err?.message || err) });
+                const result = await startCheckout(passPlan);
+                if (result.error === 'no_session') {
+                  alert('Pro aktivaci Hra Passu se prosím nejdřív přihlas.');
+                  closeModal();
+                } else if (result.error) {
                   alert('Platbu se nepodařilo zahájit. Zkus to prosím znovu později.');
                 }
               }}
@@ -960,7 +1015,7 @@ export default function ModalManager() {
                 <span style={{ fontFamily: 'Inter', fontWeight: '700', fontSize: '12px' }}>Nebo odemkni zdarma — přiveď 2 hráče</span>
               </div>
               <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#9A9AB5', marginTop: '4px' }}>
-                {referralSignupsCount === null ? 'Načítám…' : `${Math.min(referralSignupsCount, 2)}/2 hráčů — druhý ti hned odemkne další uzel.`}
+                {referralSignupsCount === null ? 'Načítám…' : `${Math.min(referralSignupsCount, 2)}/2 aktivních hráčů — počítá se, až pozvaný dokončí první výzvu. Druhý ti hned odemkne další uzel.`}
               </div>
               <button
                 onClick={async () => {
@@ -1287,7 +1342,7 @@ export default function ModalManager() {
               <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#9A9AB5', marginTop: '4px' }}>
                 {referralSignupsCount === null
                   ? 'Načítám…'
-                  : `${referralSignupsCount} pozvaných · 1. = +1 klíč, 2. = odemkni uzel zdarma, 3. = vzácná karta, 5. = odznak`}
+                  : `${referralSignupsCount} aktivních pozvaných (dokončili první výzvu) · 1. = +1 klíč, 2. = odemkni uzel zdarma, 3. = vzácná karta, 5. = odznak`}
               </div>
               <button
                 onClick={async () => {
@@ -1380,6 +1435,36 @@ export default function ModalManager() {
                 }}
               >
                 Správa obsahu (Admin) 🛠️
+              </button>
+            )}
+
+            {/* spec-12 §3: community lives on Discord — direct link from the app */}
+            {DISCORD_INVITE_URL && (
+              <a
+                href={DISCORD_INVITE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => track('discord_community_clicked', { source: 'settings' })}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '40px',
+                  border: '1px solid #5865F2', color: '#A5ADFF', fontFamily: 'Inter', fontWeight: '600', fontSize: '13px',
+                  borderRadius: '12px', marginTop: '10px', textDecoration: 'none'
+                }}
+              >
+                Komunita na Discordu →
+              </a>
+            )}
+
+            {user?.passHolder && (
+              <button
+                onClick={openBillingPortal}
+                disabled={portalBusy}
+                style={{
+                  width: '100%', height: '40px', background: 'transparent', border: '1px solid #F5B73F', color: '#F5B73F',
+                  fontFamily: 'Inter', fontWeight: '600', fontSize: '13px', borderRadius: '12px', cursor: 'pointer', marginTop: '10px'
+                }}
+              >
+                {portalBusy ? 'Otevírám…' : 'Spravovat / zrušit předplatné'}
               </button>
             )}
 
