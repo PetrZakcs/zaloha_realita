@@ -34,13 +34,46 @@ serve(async (req) => {
       });
     }
 
-    const { discordUserId, cardKey } = await req.json();
+    const { cardKey } = await req.json();
 
-    if (!discordUserId || !cardKey) {
+    if (!cardKey || typeof cardKey !== "string") {
       return new Response(
-        JSON.stringify({ error: "Missing discordUserId or cardKey parameters" }),
+        JSON.stringify({ error: "Missing cardKey parameter" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // The Discord id comes from the caller's own profile (set server-side from the verified
+    // Discord identity by sync_discord_identity()), never from the request body — otherwise
+    // any logged-in player could write cards into someone else's Airtable record.
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("discord_user_id")
+      .eq("id", user.id)
+      .maybeSingle();
+    const discordUserId = profile?.discord_user_id;
+    if (profileError || !discordUserId) {
+      return new Response(
+        JSON.stringify({ error: "No Discord account linked" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Only cards the player actually owns. 'doer-mvp1' is the starter card every account has
+    // (alwaysUnlocked in src/lib/cards.js) and has no user_cards row.
+    if (cardKey !== "doer-mvp1") {
+      const { data: owned, error: ownedError } = await supabase
+        .from("user_cards")
+        .select("card_key")
+        .eq("user_id", user.id)
+        .eq("card_key", cardKey)
+        .maybeSingle();
+      if (ownedError || !owned) {
+        return new Response(
+          JSON.stringify({ error: "Card not owned" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     const airtablePat = Deno.env.get("AIRTABLE_PAT") || "";
@@ -93,8 +126,8 @@ serve(async (req) => {
       const errText = await response.text();
       console.error(`Airtable API error: ${errText}`);
       return new Response(
-        JSON.stringify({ error: `Airtable API error: ${errText}` }),
-        { status: response.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: "Airtable sync failed" }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -108,7 +141,7 @@ serve(async (req) => {
   } catch (error) {
     console.error("Airtable Sync crash:", error);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: "Airtable sync failed" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

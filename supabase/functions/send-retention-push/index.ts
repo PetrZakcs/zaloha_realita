@@ -41,15 +41,18 @@ serve(async (req) => {
 
   try {
     const authHeader = req.headers.get("Authorization") || "";
+    const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : "";
     const cronSecretHeader = req.headers.get("x-cron-secret") || "";
     const expectedServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
     const expectedCronSecret = Deno.env.get("CRON_SECRET") || "";
 
+    // Exact match only (was a substring `includes()` check), and fail closed when no secret
+    // is configured at all instead of letting every request through.
     const isAuthorized =
-      (expectedServiceKey && authHeader.includes(expectedServiceKey)) ||
-      (expectedCronSecret && (authHeader.includes(expectedCronSecret) || cronSecretHeader === expectedCronSecret));
+      (expectedServiceKey !== "" && bearer === expectedServiceKey) ||
+      (expectedCronSecret !== "" && (bearer === expectedCronSecret || cronSecretHeader === expectedCronSecret));
 
-    if (!isAuthorized && (expectedServiceKey || expectedCronSecret)) {
+    if (!isAuthorized) {
       return new Response(JSON.stringify({ error: "Unauthorized cron/service invocation" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -162,7 +165,7 @@ serve(async (req) => {
     });
   } catch (error) {
     console.error("send-retention-push crashed:", error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: "send-retention-push failed" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

@@ -7,10 +7,31 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
   httpClient: Stripe.createFetchHttpClient(),
 });
 
+// The browser only chooses a plan name — never a raw Stripe price id. Previously the client
+// sent `priceId` itself, so any price in the Stripe account (e.g. the cheap deposit price) could
+// be bought in subscription mode and stripe-webhook would grant the full Founder Pass for it.
+const PLANS: Record<string, { priceEnv: string; mode: "subscription" | "payment" }> = {
+  monthly: { priceEnv: "STRIPE_PRICE_ID_MONTHLY", mode: "subscription" },
+  yearly: { priceEnv: "STRIPE_PRICE_ID_YEARLY", mode: "subscription" },
+  deposit: { priceEnv: "STRIPE_PRICE_ID_DEPOSIT", mode: "payment" },
+};
+
+// Where Stripe may redirect after checkout (required secret, e.g. the production app origin).
+// Client-supplied URLs are ignored — they made the hosted checkout page an open redirect.
+const APP_URL = (Deno.env.get("APP_URL") || "").replace(/\/+$/, "");
+
+// Wildcard is fine here: the endpoint is authorized by the Bearer JWT, not by cookies.
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+function json(body: unknown, status: number) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
 
 serve(async (req) => {
   // Handle CORS Preflight
@@ -21,10 +42,7 @@ serve(async (req) => {
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Missing Authorization header" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
-      });
+      return json({ error: "Missing Authorization header" }, 401);
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
@@ -35,56 +53,44 @@ serve(async (req) => {
 
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized access" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
-      });
+      return json({ error: "Unauthorized access" }, 401);
     }
 
-    const { priceId, userId, email, type, successUrl, cancelUrl } = await req.json();
-
-    if (!priceId || !userId) {
-      return new Response(
-        JSON.stringify({ error: "Missing priceId or userId parameters" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    const { plan } = await req.json();
+    const planConfig = PLANS[plan as string];
+    if (!planConfig) {
+      return json({ error: "Unknown plan" }, 400);
     }
 
-    // Verify that the authenticated caller matches the target userId
-    if (user.id !== userId) {
-      return new Response(
-        JSON.stringify({ error: "Forbidden: user ID mismatch" }),
-        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    if (!APP_URL) {
+      console.error("stripe-checkout: APP_URL is not configured");
+      return json({ error: "Checkout is not configured" }, 500);
     }
 
-    // Determine checkout mode
-    const mode = type === "DEPOSIT_TEST" ? "payment" : "subscription";
+    const priceId = Deno.env.get(planConfig.priceEnv) || "";
+    if (!priceId) {
+      console.error(`stripe-checkout: ${planConfig.priceEnv} is not configured`);
+      return json({ error: "Plan is not available" }, 400);
+    }
 
-    // Create Stripe Checkout Session
+    // client_reference_id and metadata come from the verified JWT, not the request body.
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
-      client_reference_id: userId,
-      customer_email: email || undefined,
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
-        },
-      ],
-      mode: mode,
-      success_url: successUrl || "https://hrahreality.cz/success",
-      cancel_url: cancelUrl || "https://hrahreality.cz/cancel",
+      client_reference_id: user.id,
+      customer_email: user.email || undefined,
+      line_items: [{ price: priceId, quantity: 1 }],
+      mode: planConfig.mode,
+      metadata: { user_id: user.id, plan },
+      ...(planConfig.mode === "subscription"
+        ? { subscription_data: { metadata: { user_id: user.id, plan } } }
+        : {}),
+      success_url: `${APP_URL}/?payment=success`,
+      cancel_url: `${APP_URL}/?payment=cancel`,
     });
 
-    return new Response(
-      JSON.stringify({ sessionId: session.id, sessionUrl: session.url }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return json({ sessionId: session.id, sessionUrl: session.url }, 200);
   } catch (error) {
-    return new Response(
-      JSON.stringify({ error: error.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    console.error("stripe-checkout failed:", error);
+    return json({ error: "Checkout could not be created" }, 500);
   }
 });
