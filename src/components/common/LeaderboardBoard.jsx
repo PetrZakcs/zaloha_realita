@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Crown } from 'lucide-react';
+import { track } from '../../lib/analytics';
 import { useUserStore } from '../../store/userStore';
 
 // Shared by MobileLeaderboard/DesktopLeaderboard. Both previously rendered a hard-coded
@@ -60,6 +61,8 @@ function PodiumSlot({ player, rank, unit, onOpen }) {
   );
 }
 
+const DISCORD_INVITE_URL = process.env.REACT_APP_DISCORD_INVITE_URL || '';
+
 export default function LeaderboardBoard({ compact = false }) {
   const navigate = useNavigate();
   const { user, leaderboard, weeklyTopDoers, fetchLeaderboard, fetchWeeklyTopDoers } = useUserStore();
@@ -82,6 +85,18 @@ export default function LeaderboardBoard({ compact = false }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? '14px' : '18px' }}>
+      {/* spec-12 §3: the community itself lives on Discord, the app links straight to it. */}
+      {DISCORD_INVITE_URL && (
+        <a
+          href={DISCORD_INVITE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => track('discord_community_clicked', { source: 'community_tab' })}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '46px', background: '#5865F2', color: '#fff', fontFamily: 'Inter', fontWeight: 700, fontSize: '14px', borderRadius: '14px', textDecoration: 'none' }}
+        >
+          Vstoupit do komunity na Discordu →
+        </a>
+      )}
       <div style={{ display: 'flex', gap: '8px' }}>
         {TABS.map(t => {
           const active = tab === t.key;

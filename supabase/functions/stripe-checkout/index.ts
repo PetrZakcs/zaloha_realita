@@ -67,7 +67,19 @@ serve(async (req) => {
       return json({ error: "Checkout is not configured" }, 500);
     }
 
-    const priceId = Deno.env.get(planConfig.priceEnv) || "";
+    let priceId = Deno.env.get(planConfig.priceEnv) || "";
+
+    // spec-13: 149 Kč holds until the player cancels; coming back costs 199 Kč. Applies once the
+    // returning price is configured. RLS limits this query to the caller's own subscriptions.
+    const returningPriceId = Deno.env.get("STRIPE_PRICE_ID_MONTHLY_RETURNING") || "";
+    if (plan === "monthly" && returningPriceId) {
+      const { count } = await supabase
+        .from("subscriptions")
+        .select("stripe_subscription_id", { count: "exact", head: true })
+        .eq("user_id", user.id);
+      if ((count ?? 0) > 0) priceId = returningPriceId;
+    }
+
     if (!priceId) {
       console.error(`stripe-checkout: ${planConfig.priceEnv} is not configured`);
       return json({ error: "Plan is not available" }, 400);

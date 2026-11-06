@@ -20,7 +20,7 @@ export default function DesktopLeaderboard() {
         flexShrink: 0
       }}>
         <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '22px', color: '#F0F0F8' }}>
-          Žebříček
+          Komunita
         </div>
         <div style={{ flex: 1 }}></div>
         <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '12px', color: '#A78BFA' }}>

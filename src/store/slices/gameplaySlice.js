@@ -1,5 +1,20 @@
 import { supabase } from '../../api/supabaseClient';
 import { track } from '../../lib/analytics';
+import { levelFromXp } from '../../lib/levels';
+import { compressImage } from '../../lib/compressImage';
+import { scrubVideoLocation } from '../../lib/stripMetadata';
+
+// Stored reference to a file in the private bucket. Not fetchable as is: "Moje důkazy" turns it
+// into a short-lived signed URL (src/lib/privateMedia.js).
+const privateProofUrl = (path) => `${process.env.REACT_APP_SUPABASE_URL}/storage/v1/object/authenticated/proofs-private/${path}`;
+
+// Exported for tests.
+export function pickActiveLoop(loops) {
+  return loops.find(l => l.is_mandatory && !l.done)
+    || loops.find(l => !l.done)
+    || loops[loops.length - 1]
+    || null;
+}
 
 export const createGameplaySlice = (set, get) => ({
   activeModal: null,
@@ -8,21 +23,13 @@ export const createGameplaySlice = (set, get) => ({
   lastReward: null,
   proofsSubmittedCount: parseInt(localStorage.getItem('proofsSubmittedCount') || '0', 10),
 
-  activeChallenge: {
-    id: 'npc-challenge',
-    title: 'Prokaž, že nejsi NPC',
-    type: 'Environmentální reset',
-    category: 'Výzva 3 · Mikro-akce',
-    description: 'Jeden mikro-zásah do reality. Do 15 minut. Najdi 3 odhozené kusy odpadu, seber je a vyhoď do koše.',
-    reward_xp: 50,
-    reward_keys: 2
-  },
+  // Real content only — null until the player's node is loaded from Supabase.
+  activeChallenge: null,
+  // All loops of the current node (Game Bible · Progression "NODES": several loops per node):
+  // [{ id, title, loop_order, is_mandatory, done }]
+  activeNodeLoops: [],
   storyDialogStep: 0,
-  storyDialogs: [
-    { sender: 'zaya', text: 'Většina lidí kolem tebe dnes neudělá nic. Ty máš jinou roli. Připrav se na zásah.', sys: 'GL_TCH://NODE_03_ACTIVE' },
-    { sender: 'player', text: 'Jsem připraven.' },
-    { sender: 'zaya', text: 'Skvělé. Uzel 3 se aktivuje. Tvoje výzva: "Prokaž, že nejsi NPC" je odemčena. Ukaž světu, že jednáš.' }
-  ],
+  storyDialogs: [],
   dialogCompleted: false,
 
   activeStoryNode: null,
@@ -43,13 +50,18 @@ export const createGameplaySlice = (set, get) => ({
     sentenceText: ''
   },
 
-  notifications: [
-    { id: 'n1', title: 'Zaya', text: 'Vítej v Hře Reality! Tvá dobrodružství začínají.', time: 'Před 2 dny', unread: false },
-    { id: 'n2', title: 'Odměna', text: 'Získal jsi odznak Doer za registraci.', time: 'Před 1 dnem', unread: true }
-  ],
 
   openModal: (modalName) => set({ activeModal: modalName }),
-  closeModal: () => set({ activeModal: null, proofError: null }),
+
+  // "Zkus taky" from a feed post (spec-17 §6) — the modal resolves the post's exact quest.
+  tryTooPost: null,
+  openTryToo: (post) => set({ tryTooPost: post, activeModal: 'try-too' }),
+  // Closing the identity reveal (any close button) also consumes it, so it doesn't reopen.
+  closeModal: () => set(state => ({
+    activeModal: null,
+    proofError: null,
+    identityReveal: state.activeModal === 'identity-reveal' ? null : state.identityReveal
+  })),
 
   loadCurrentNodeData: async () => {
     const u = get().user;
@@ -88,114 +100,55 @@ export const createGameplaySlice = (set, get) => ({
         });
 
         if (nodeData.type === 'CHALLENGE' || nodeData.type === 'FINAL') {
-          const { data: challengeData } = await supabase
-            .from('challenges')
-            .select('*')
-            .eq('story_node_id', nodeData.id)
-            .single();
-
-          if (challengeData) {
-            set({ activeChallenge: challengeData });
-
-            const { data: stepsData } = await supabase
-              .from('challenge_steps')
-              .select('*')
-              .eq('challenge_id', challengeData.id)
-              .order('step_order', { ascending: true });
-
-            set({ activeStoryNodeSteps: stepsData || [] });
-          }
+          await get().refreshNodeLoops(nodeData);
         } else {
-          set({ activeChallenge: null, activeStoryNodeSteps: [] });
+          set({ activeChallenge: null, activeNodeLoops: [], activeStoryNodeSteps: [] });
         }
       }
     } catch (err) {
-      console.warn('Failed to load dynamic node content from Supabase. Using fallback mockups.', err);
-      const nodeIndex = u.uzel || 1;
-      const nodeFallbackMap = {
-        1: {
-          title: '3 minuty ticha',
-          description: 'Zastav se a po dobu 3 minut pouze pozoruj okolí bez koukání do mobilu.',
-          why_text: 'Uvědomíš si, kolik detailů ti denně uniká v autopilotu.',
-          proof_type: 'TEXT',
-          reward_keys: 1,
-          reward_xp: 25,
-          steps: [{ order: 1, text: 'Zastav se na klidném místě.' }, { order: 2, text: '3 minuty pozoruj okolí.' }],
-          dialogs: [
-            { sender: 'zaya', text: 'Většina lidí kolem tebe dnes neudělá nic nového. Ty se probouzíš.', sys: 'GL_TCH://NODE_01_ACTIVE' },
-            { sender: 'player', text: 'Jsem připraven.' },
-            { sender: 'zaya', text: 'Tvá první výzva: Zastav se na 3 minuty bez obrazovky.' }
-          ]
-        },
-        2: {
-          title: 'Signal Cut (Detox)',
-          description: 'Odlož telefon na 45 minut, vypni notifikace a vyfoť analogové zátiší.',
-          why_text: 'Získáš zpět svou pozornost a klid v mysli.',
-          proof_type: 'PHOTO',
-          reward_keys: 2,
-          reward_xp: 40,
-          steps: [{ order: 1, text: 'Vypni notifikace.' }, { order: 2, text: 'Odlož telefon na 45 min.' }],
-          dialogs: [
-            { sender: 'zaya', text: 'Uzel 2 se aktivuje. Signal Cut.', sys: 'GL_TCH://NODE_02_ACTIVE' },
-            { sender: 'player', text: 'Rozumím.' },
-            { sender: 'zaya', text: 'Odlož displej a vrať se k vnímání prostorem.' }
-          ]
-        },
-        3: {
-          title: 'Prokaž, že nejsi NPC',
-          description: 'Jeden mikro-zásah do reality. Do 15 minut. Najdi 3 odhozené kusy odpadu, seber je a vyhoď do koše.',
-          why_text: 'Tímto malým činem ukážeš světu, že jednáš z vlastní vůle, ne jako naprogramovaný NPC.',
-          proof_type: 'PHOTO',
-          reward_keys: 2,
-          reward_xp: 50,
-          steps: [
-            { order: 1, text: 'Vyjdi ven z domu nebo kanceláře.' },
-            { order: 2, text: 'Najdi v okruhu 100 metrů 3 odhozené odpadky.' },
-            { order: 3, text: 'Odnes je k nejbližšímu popelnici či koši.' },
-            { order: 4, text: 'Vyfoť je těsně před vyhozením jako důkaz.' }
-          ],
-          dialogs: [
-            { sender: 'zaya', text: 'Většina lidí kolem tebe dnes neudělá nic. Ty máš jinou roli. Připrav se na zásah.', sys: 'GL_TCH://NODE_03_ACTIVE' },
-            { sender: 'player', text: 'Jsem připraven.' },
-            { sender: 'zaya', text: 'Skvělé. Uzel 3 se aktivuje. Tvoje výzva: "Prokaž, že nejsi NPC" je odemčena. Ukaž světu, že jednáš.' }
-          ]
-        },
-        9: {
-          title: 'Prolomení Sítě ZAYA (Boss Fight)',
-          description: 'Celodenní výzva: 24h bez sociálních sítí + 10 000 kroků + 1 dobrý skutek.',
-          why_text: 'Stáváš se oficiálně potvrzeným Doerem Season 0.',
-          proof_type: 'PHOTO',
-          reward_keys: 10,
-          reward_xp: 500,
-          steps: [
-            { order: 1, text: 'Zapni mód nerušit.' },
-            { order: 2, text: 'Ujdi 10 000 kroků.' },
-            { order: 3, text: 'Udělej dobrý skutek.' }
-          ],
-          dialogs: [
-            { sender: 'zaya', text: 'Finální uzel Season 0. Boss fight.', sys: 'GL_TCH://NODE_09_FINAL' },
-            { sender: 'player', text: 'Jdu na to.' },
-            { sender: 'zaya', text: 'Prolom síť ZAYA a získej kartu Doer MVP-1.' }
-          ]
-        }
-      };
+      // No invented fallback quests any more — they had ids complete_challenge() rejects.
+      console.warn('Failed to load node content from Supabase.', err);
+      set({ activeChallenge: null, activeNodeLoops: [], activeStoryNodeSteps: [] });
+    }
+  },
 
-      const fallback = nodeFallbackMap[nodeIndex] || nodeFallbackMap[3];
-      set({
-        activeChallenge: {
-          id: `c-node-${nodeIndex}`,
-          title: fallback.title,
-          description: fallback.description,
-          why_text: fallback.why_text,
-          proof_type: fallback.proof_type,
-          reward_keys: fallback.reward_keys,
-          reward_xp: fallback.reward_xp
-        },
-        activeStoryNodeSteps: fallback.steps,
-        storyDialogs: fallback.dialogs,
-        storyDialogStep: 0,
-        dialogCompleted: false
-      });
+  // Picks the loop to play in the current node: the first unfinished mandatory loop, then the
+  // first unfinished optional one, else the last loop (all done → "Pokračovat" advances).
+  // Doesn't touch the node's story dialog, so finishing loop A goes straight to loop B.
+  refreshNodeLoops: async (node = get().activeStoryNode) => {
+    const u = get().user;
+    if (!node || !u?.id) return;
+    try {
+      const { data: challenges, error } = await supabase
+        .from('challenges')
+        .select('*')
+        .eq('story_node_id', node.id)
+        .order('loop_order', { ascending: true })
+        .order('id', { ascending: true });
+      if (error) throw error;
+      const list = challenges || [];
+      const { data: done } = list.length
+        ? await supabase.from('challenge_completions').select('challenge_id').eq('user_id', u.id).in('challenge_id', list.map(c => c.id))
+        : { data: [] };
+      const doneIds = new Set((done || []).map(d => d.challenge_id));
+      const loops = list.map(c => ({ id: c.id, title: c.title, loop_order: c.loop_order, is_mandatory: c.is_mandatory !== false, done: doneIds.has(c.id) }));
+      const pick = pickActiveLoop(loops);
+      const challenge = list.find(c => c.id === pick?.id) || null;
+      set({ activeNodeLoops: loops, activeChallenge: challenge });
+
+      if (challenge) {
+        const { data: stepsData } = await supabase
+          .from('challenge_steps')
+          .select('*')
+          .eq('challenge_id', challenge.id)
+          .order('step_order', { ascending: true });
+        set({ activeStoryNodeSteps: stepsData || [] });
+      } else {
+        set({ activeStoryNodeSteps: [] });
+      }
+    } catch (e) {
+      console.warn('Failed to load node loops.', e);
+      set({ activeChallenge: null, activeNodeLoops: [], activeStoryNodeSteps: [] });
     }
   },
 
@@ -250,15 +203,34 @@ export const createGameplaySlice = (set, get) => ({
 
     let imageUrl = null;
     if (proofData.photoFile) {
-      set(s => ({ mockLogs: [...s.mockLogs, 'Nahrávám fotografii...'] }));
-      const ext = (proofData.photoFile.name.split('.').pop() || 'jpg').toLowerCase();
-      const path = `${session.user.id}/${Date.now()}.${ext}`;
-      const { error: uploadError } = await supabase.storage.from('proofs').upload(path, proofData.photoFile);
-      if (uploadError) {
-        fail('Fotku se nepodařilo nahrát. Zkus menší obrázek (max 10 MB, JPG/PNG/WebP/HEIC).', uploadError);
+      // spec-12 §2.3 "foto/video upload" — photos ≤ 10 MB, short videos ≤ 50 MB (bucket cap).
+      const isVideo = (proofData.photoFile.type || '').startsWith('video/');
+      const maxBytes = (isVideo ? 50 : 10) * 1024 * 1024;
+      if (proofData.photoFile.size > maxBytes) {
+        fail(isVideo ? 'Video může mít maximálně 50 MB.' : 'Fotka může mít maximálně 10 MB.', 'file too large');
         return;
       }
-      imageUrl = supabase.storage.from('proofs').getPublicUrl(path).data?.publicUrl || null;
+      set(s => ({ mockLogs: [...s.mockLogs, isVideo ? 'Nahrávám video...' : 'Nahrávám fotografii...'] }));
+      // Photos are re-encoded (smaller + no EXIF/GPS); videos get their location atoms scrubbed.
+      let uploadFile;
+      try {
+        uploadFile = isVideo ? await scrubVideoLocation(proofData.photoFile) : await compressImage(proofData.photoFile);
+      } catch (e) {
+        fail('Tenhle formát fotky neumíme zpracovat. Pošli ji prosím jako JPG nebo PNG.', e);
+        return;
+      }
+      const ext = (uploadFile.name.split('.').pop() || (isVideo ? 'mp4' : 'jpg')).toLowerCase();
+      const path = `${session.user.id}/${Date.now()}.${ext}`;
+      // A private proof goes to the owner-only bucket: its URL must not be publicly readable.
+      const bucket = proofData.is_public ? 'proofs' : 'proofs-private';
+      const { error: uploadError } = await supabase.storage.from(bucket).upload(path, uploadFile);
+      if (uploadError) {
+        fail('Soubor se nepodařilo nahrát. Podporujeme JPG, PNG, WebP, HEIC a video MP4, WebM nebo MOV.', uploadError);
+        return;
+      }
+      imageUrl = proofData.is_public
+        ? (supabase.storage.from(bucket).getPublicUrl(path).data?.publicUrl || null)
+        : privateProofUrl(path);
     }
 
     set(s => ({ mockLogs: [...s.mockLogs, 'Zapisuji zásah do světa...'] }));
@@ -281,10 +253,12 @@ export const createGameplaySlice = (set, get) => ({
       ...u,
       xp: result.new_xp,
       keys_count: result.new_keys_balance,
-      badges_count: result.new_avatar_level
+      badges_count: result.new_avatar_level,
+      questsCompleted: result.already_completed ? (u.questsCompleted ?? 0) : (u.questsCompleted ?? 0) + 1
     };
 
-    const proofsSubmitted = result.already_completed ? get().proofsSubmittedCount : get().proofsSubmittedCount + 1;
+    // Server-backed, so the 3rd/5th proof moments stay right across devices and re-logins.
+    const proofsSubmitted = updatedUser.questsCompleted;
     set({
       user: updatedUser,
       proofsSubmittedCount: proofsSubmitted,
@@ -296,7 +270,15 @@ export const createGameplaySlice = (set, get) => ({
         keysGained: Math.max(0, result.new_keys_balance - (u.keys_count || 0)),
         levelBefore: u.badges_count || 0,
         levelAfter: result.new_avatar_level || 0,
-        proofNumber: proofsSubmitted
+        proofNumber: proofsSubmitted,
+        challengeId: c.id,
+        node: u.uzel,
+        firstQuest: !result.already_completed && (u.questsCompleted ?? 0) === 0,
+        proofText: proofData.text || null,
+        hasMedia: !!proofData.photoFile,
+        // Lifetime Level (Game Bible) before/after — drives the "Posunul(a) jsem se" rank card.
+        lifetimeLevelBefore: levelFromXp(u.xp || 0),
+        lifetimeLevelAfter: levelFromXp(result.new_xp)
       }
     });
     localStorage.setItem('user', JSON.stringify(updatedUser));
@@ -305,6 +287,11 @@ export const createGameplaySlice = (set, get) => ({
     get().loadUnlockedCards();
     get().fetchFeedPosts();
     get().fetchMysteryBoxes();
+    get().loadIdentityExtras();
+    get().refreshNodeLoops();
+    get().fetchPlayerProgress();
+    get().fetchNotifications();
+    get().fetchIdentityItems();
     // airtable-sync is deliberately not called here any more: it pushed the app-only
     // 'doer-mvp1' key, which doesn't exist in the album.hrareality.cz Season 0 catalog.
     // Re-enable once the app ↔ album card mapping is agreed.
@@ -314,7 +301,8 @@ export const createGameplaySlice = (set, get) => ({
       node: u.uzel,
       is_public: proofData.is_public,
       has_photo: !!proofData.photoFile,
-      already_completed: !!result.already_completed
+      already_completed: !!result.already_completed,
+      seconds_since_start: proofData.startedAt ? Math.round((Date.now() - proofData.startedAt) / 1000) : null
     });
 
     set({ activeModal: 'success-overlay' });
@@ -422,6 +410,8 @@ export const createGameplaySlice = (set, get) => ({
 
       const updated = { ...u, uzel: result.new_uzel };
       set({ user: updated, activeModal: null });
+      get().fetchIdentityItems();
+      get().fetchPlayerProgress();
       localStorage.setItem('user', JSON.stringify(updated));
       track('node_completed', { node: result.new_uzel, via_free_daily: useFreeDaily });
       get().loadCurrentNodeData();
@@ -518,38 +508,28 @@ export const createGameplaySlice = (set, get) => ({
     }
   },
 
-  toggleNotificationRead: (id) => {
-    set(state => ({
-      notifications: state.notifications.map(n => n.id === id ? { ...n, unread: false } : n)
-    }));
-  },
-
-  resetProgress: () => {
-    localStorage.removeItem('user');
-    localStorage.removeItem('onboarded');
-    localStorage.removeItem('onboardingStep');
-    localStorage.removeItem('proofsSubmittedCount');
-    localStorage.removeItem('glitchMomentShown');
-    set({
-      user: null,
-      onboarded: false,
-      onboardingStep: 'entry',
-      activeModal: null,
-      storyDialogStep: 0,
-      dialogCompleted: false,
-      activeStoryNode: null,
-      activeStoryNodeSteps: [],
-      proofsSubmittedCount: 0,
-      seasonReflectionSubmitted: null,
-      seasonReflectionStep: 'pre-frame',
-      seasonReflectionAnswers: {
-        percent: 50,
-        wouldRecommend: null,
-        referralIntent: null,
-        sentenceTemplate: null,
-        sentenceText: ''
-      },
-      welcomeBackDays: null
-    });
+  // spec-20 "po nákupu: Status aktivován. Jsi Founder." The Pass is flipped by stripe-webhook,
+  // which can land a moment after Stripe redirects back, so this waits for it instead of leaving
+  // a paying player looking at the paywall.
+  passActivation: null, // null | 'waiting' | 'active' | 'delayed'
+  awaitPassActivation: async () => {
+    set({ passActivation: 'waiting', activeModal: 'pass-activated' });
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { set({ passActivation: 'delayed' }); return; }
+    for (let attempt = 0; attempt < 15; attempt++) {
+      const { data } = await supabase.from('profiles').select('pass_holder').eq('id', session.user.id).maybeSingle();
+      if (data?.pass_holder) {
+        const u = get().user;
+        if (u) {
+          const updated = { ...u, passHolder: true, passLapsed: false };
+          set({ user: updated });
+          localStorage.setItem('user', JSON.stringify(updated));
+        }
+        set({ passActivation: 'active' });
+        return;
+      }
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    set({ passActivation: 'delayed' });
   }
 });

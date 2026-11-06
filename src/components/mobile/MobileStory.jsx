@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useUserStore } from '../../store/userStore';
+import NodeLoops from '../common/NodeLoops';
 import { ChevronLeft, LockOpen, ArrowRight } from 'lucide-react';
 import TypewriterText from '../common/TypewriterText';
 
@@ -50,7 +51,7 @@ export default function MobileStory() {
           <ChevronLeft size={20} />
         </span>
         <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '15px' }}>
-          Uzel {user?.uzel ?? 3} / 9
+          Uzel {user?.uzel ?? 1} / 9
         </span>
         <span 
           onClick={() => openModal('collections')}
@@ -64,7 +65,7 @@ export default function MobileStory() {
             cursor: 'pointer'
           }}
         >
-          #{user?.xp || 240}
+          #{user?.xp ?? 0}
         </span>
       </div>
 
@@ -166,6 +167,7 @@ export default function MobileStory() {
             <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '18px', color: '#F0F0F8' }}>
               {activeChallenge.title}
             </div>
+            <NodeLoops />
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
               {activeStoryNodeSteps.length > 0 ? (
                 activeStoryNodeSteps.map((step, idx) => (

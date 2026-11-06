@@ -18,6 +18,7 @@ let mockSingle = jest.fn(() => Promise.resolve({ data: null, error: null }));
 let mockInsert = jest.fn(() => Promise.resolve({ error: null }));
 let mockUpdateEq = jest.fn(() => Promise.resolve({ error: null }));
 let mockRpc = jest.fn(() => Promise.resolve({ data: null, error: null }));
+let mockPlayerState = [];
 
 jest.mock('../../api/supabaseClient', () => {
   function genericChain(resolvedValue) {
@@ -55,6 +56,7 @@ jest.mock('../../api/supabaseClient', () => {
             update: (fields) => ({ eq: (col, val) => mockUpdateEq(fields, col, val) }),
           };
         }
+        if (table === 'player_state') return genericChain({ data: mockPlayerState, error: null });
         return genericChain({ data: [], error: null });
       },
       rpc: (...args) => mockRpc(...args),
@@ -101,14 +103,14 @@ test('existing profile: loads it via fetchUser and never attempts an INSERT', as
   expect(mockInsert).not.toHaveBeenCalled();
 });
 
-test('new user: INSERT succeeds on the first try and advances to avatar-upgrade', async () => {
+test('new user: INSERT succeeds on the first try and advances to the identity step', async () => {
   mockMaybeSingle.mockResolvedValue({ data: null, error: null });
   mockInsert.mockResolvedValue({ error: null });
 
   await useUserStore.getState().handleOAuthSession(fakeSession());
 
   expect(mockInsert).toHaveBeenCalledTimes(1);
-  expect(useUserStore.getState().onboardingStep).toBe('avatar-upgrade');
+  expect(useUserStore.getState().onboardingStep).toBe('identity');
 });
 
 test('display_name collision: retries the INSERT with a freshly generated name instead of giving up', async () => {
@@ -180,4 +182,48 @@ test('non-Discord login never calls sync_discord_identity', async () => {
   await useUserStore.getState().handleOAuthSession(fakeSession());
 
   expect(mockRpc).not.toHaveBeenCalledWith('sync_discord_identity');
+});
+
+describe('session and onboarding resume', () => {
+  const profileRow = { id: 'user-9', display_name: 'Devět', xp: 50, uzel: 1, keys_balance: 1, avatar_level: 1, pass_holder: false, discord_user_id: 'x' };
+
+  beforeEach(() => {
+    localStorage.clear();
+    useUserStore.setState({ user: null, onboarded: false, onboardingStep: 'landing', _handlingOAuthSessionId: null });
+    mockMaybeSingle = jest.fn(() => Promise.resolve({ data: null, error: null }));
+    mockSingle = jest.fn(() => Promise.resolve({ data: profileRow, error: null }));
+  });
+
+  test('a signed-in player mid-onboarding stays in onboarding on reload', async () => {
+    useUserStore.setState({ onboardingStep: 'slib' });
+    await useUserStore.getState().fetchUser('user-9');
+    expect(useUserStore.getState().onboarded).toBe(false);
+    expect(useUserStore.getState().onboardingStep).toBe('slib');
+    expect(useUserStore.getState().user.name).toBe('Devět');
+  });
+
+  test('a returning player with nothing in progress goes straight into the game', async () => {
+    await useUserStore.getState().fetchUser('user-9');
+    expect(useUserStore.getState().onboarded).toBe(true);
+  });
+
+  test('a player with no onboarding record resumes at identity on a new device', async () => {
+    mockPlayerState = { onboarding_completed_at: null, onboarding_skipped_at: null };
+    await useUserStore.getState().fetchUser('user-9');
+    mockPlayerState = [];
+    expect(useUserStore.getState().onboarded).toBe(false);
+    expect(useUserStore.getState().onboardingStep).toBe('identity');
+  });
+
+  test('clearLocalSession forgets the player and returns to the landing', () => {
+    localStorage.setItem('onboarded', 'true');
+    localStorage.setItem('user', '{}');
+    useUserStore.setState({ user: { id: 'x' }, onboarded: true });
+    useUserStore.getState().clearLocalSession();
+    expect(useUserStore.getState().user).toBeNull();
+    expect(useUserStore.getState().onboarded).toBe(false);
+    expect(useUserStore.getState().onboardingStep).toBe('landing');
+    expect(localStorage.getItem('onboarded')).toBeNull();
+    expect(localStorage.getItem('user')).toBeNull();
+  });
 });

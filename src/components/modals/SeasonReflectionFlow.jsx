@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useUserStore } from '../../store/userStore';
 import { track } from '../../lib/analytics';
-import { buildReferralLink, shareContent } from '../../lib/share';
 import { startCheckout } from '../../lib/checkout';
-import { ArrowRight, Share2, Sparkles, Lock, Check } from 'lucide-react';
+import { ArrowRight, Sparkles, Lock } from 'lucide-react';
+import ShareMomentButton from '../common/ShareMomentButton';
 
 // Optional, configured per environment once the client supplies them.
 const VIP_DISCORD_URL = process.env.REACT_APP_DISCORD_VIP_URL || '';
@@ -69,7 +69,6 @@ export default function SeasonReflectionFlow() {
   } = useUserStore();
 
   const [submitting, setSubmitting] = useState(false);
-  const [shareState, setShareState] = useState('idle'); // idle | copied
   const [priceAnswer, setPriceAnswer] = useState(null);
   const [wantsNextTheme, setWantsNextTheme] = useState(false);
 
@@ -84,20 +83,6 @@ export default function SeasonReflectionFlow() {
     }
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleShare = async () => {
-    const shareText = `${user?.name || 'Hráč'} dokončil Hru Reality — ${answers.percent}% posun. "${answers.sentenceText}"`;
-    track('season_share_clicked');
-    const result = await shareContent({
-      title: 'Dokončil jsem Hru Reality',
-      text: shareText,
-      url: buildReferralLink(user?.referralCode)
-    });
-    if (result.shared) {
-      if (result.method === 'clipboard') setShareState('copied');
-      track('season_share_completed', { method: result.method });
-    }
-    go('unlocked');
-  };
 
   return (
     <div style={{ textAlign: 'center' }}>
@@ -290,10 +275,31 @@ export default function SeasonReflectionFlow() {
             )}
           </div>
 
-          <StepButton onClick={handleShare}>
-            {shareState === 'copied' ? <>Zkopírováno <Check size={16} /></> : <>Sdílej svůj výsledek <Share2 size={16} /></>}
-          </StepButton>
-          <StepButton variant="secondary" onClick={() => go('unlocked')}>Přeskočit</StepButton>
+          {/* spec-18 MOMENT 4: share card as an image + the one-time share reward. */}
+          <div style={{ marginTop: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <ShareMomentButton
+              variant="season"
+              rewardSource={{ type: 'season', id: 'season-0' }}
+              progressText={`${answers.percent}% reálný posun`}
+              sentence={answers.sentenceText}
+              label="Sdílej svůj výsledek"
+            />
+            {/* Certificate (spec-13 Founder Pass: "certifikát"). Free players keep the basic card above. */}
+            {user?.passHolder ? (
+              <ShareMomentButton
+                variant="certificate"
+                progressText={`${answers.percent}% reálný posun`}
+                sentence={answers.sentenceText}
+                label="Founder certifikát"
+                style={{ color: '#F5B73F', borderColor: '#F5B73F' }}
+              />
+            ) : (
+              <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', textAlign: 'center' }}>
+                Plný certifikát Season 0 je součástí Founder Passu.
+              </div>
+            )}
+          </div>
+          <StepButton onClick={() => go('unlocked')}>Pokračovat <ArrowRight size={16} /></StepButton>
         </div>
       )}
 

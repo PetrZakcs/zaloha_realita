@@ -1,12 +1,35 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../api/supabaseClient';
+import AdminPlayerDetail from './AdminPlayerDetail';
+import AdminKpi from './AdminKpi';
+import AdminCatalogs from './AdminCatalogs';
+import AdminReview from './AdminReview';
 import { 
   Save, Plus, Trash2, ArrowLeft, RefreshCw, Layers, Users, ShieldAlert, 
-  Search, Award, KeyRound, CheckCircle, ShieldX
+  Search, Award, KeyRound, CheckCircle, ShieldX, BarChart3, SlidersHorizontal, Flag, Download
 } from 'lucide-react';
 
+// Players CSV export (original spec "export dat"); `;` + BOM so Czech Excel opens it directly.
+async function exportPlayersCsv() {
+  const { data, error } = await supabase.rpc('admin_players_export');
+  if (error) { alert('Export selhal: ' + error.message); return; }
+  if (!data || data.length === 0) { alert('Žádní hráči k exportu.'); return; }
+  const columns = Object.keys(data[0]);
+  const cell = (v) => {
+    const text = v === null || v === undefined ? '' : String(v);
+    return /[";\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  const csv = [columns.join(';'), ...data.map(r => columns.map(c => cell(r[c])).join(';'))].join('\n');
+  const url = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `hraci-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function AdminContentManager({ onClose }) {
-  // Tabs: 'content' | 'players' | 'moderation'
+  // Tabs: 'content' | 'players' | 'moderation' | 'kpi' | 'catalogs' | 'review'
   const [activeTab, setActiveTab] = useState('content');
 
   // Loading states
@@ -17,6 +40,9 @@ export default function AdminContentManager({ onClose }) {
   const [nodes, setNodes] = useState([]);
   const [selectedNode, setSelectedNode] = useState(null);
   const [challenge, setChallenge] = useState(null);
+  // All loops (challenges) of the selected node — Game Bible: several loops per node.
+  const [nodeLoops, setNodeLoops] = useState([]);
+  const [worldText, setWorldText] = useState('');
   const [steps, setSteps] = useState([]);
 
   // Players Tab States
@@ -86,42 +112,76 @@ export default function AdminContentManager({ onClose }) {
     setChallenge(null);
     setSteps([]);
 
-    if (node.type === 'CHALLENGE') {
+    setNodeLoops([]);
+    if (node.type === 'CHALLENGE' || node.type === 'FINAL') {
       try {
-        const { data: challengeData } = await supabase
+        const { data: loops } = await supabase
           .from('challenges')
           .select('*')
           .eq('story_node_id', node.id)
-          .single();
+          .order('loop_order', { ascending: true })
+          .order('id', { ascending: true });
 
-        if (challengeData) {
-          setChallenge(challengeData);
-
-          const { data: stepsData } = await supabase
-            .from('challenge_steps')
-            .select('*')
-            .eq('challenge_id', challengeData.id)
-            .order('step_order', { ascending: true });
-
-          setSteps(stepsData || []);
+        setNodeLoops(loops || []);
+        if (loops && loops.length > 0) {
+          await selectLoop(loops[0]);
         } else {
-          // Empty setup
-          setChallenge({
-            id: 'c-' + node.id,
-            story_node_id: node.id,
-            title: node.title,
-            description: '',
-            why_text: '',
-            proof_type: 'PHOTO',
-            reward_keys: 1,
-            reward_xp: 10
-          });
+          setChallenge(newLoop(node, 1));
           setSteps([]);
         }
       } catch (e) {
         console.error('Error fetching challenge details:', e);
       }
     }
+  };
+
+  const newLoop = (node, loopOrder) => ({
+    id: loopOrder === 1 ? 'c-' + node.id : `c-${node.id}-${loopOrder}`,
+    story_node_id: node.id,
+    title: loopOrder === 1 ? node.title : `${node.title} · loop ${loopOrder}`,
+    description: '',
+    why_text: '',
+    proof_type: 'PHOTO',
+    reward_keys: 1,
+    reward_xp: 25,
+    quest_type: 'standard',
+    loop_order: loopOrder,
+    is_mandatory: true,
+    estimated_minutes: null,
+    difficulty: null
+  });
+
+  const selectLoop = async (loop) => {
+    setChallenge(loop);
+    const { data: stepsData } = await supabase
+      .from('challenge_steps')
+      .select('*')
+      .eq('challenge_id', loop.id)
+      .order('step_order', { ascending: true });
+    setSteps(stepsData || []);
+  };
+
+  const handleAddLoop = () => {
+    if (!selectedNode) return;
+    const nextOrder = nodeLoops.reduce((max, l) => Math.max(max, l.loop_order || 1), 0) + 1;
+    const loop = newLoop(selectedNode, nextOrder);
+    setNodeLoops([...nodeLoops, loop]);
+    setChallenge(loop);
+    setSteps([]);
+  };
+
+  // Feed Engine "System/World Card" — published under the game's name (admin-only RPC).
+  const handlePublishWorld = async () => {
+    const text = worldText.trim();
+    if (!text) return;
+    const { error } = await supabase.rpc('publish_world_post', { p_content: text });
+    if (error) {
+      alert('Publikace selhala: ' + error.message);
+      return;
+    }
+    setWorldText('');
+    alert('World karta je ve feedu.');
+    fetchData();
   };
 
   const handleSaveContent = async () => {
@@ -134,7 +194,7 @@ export default function AdminContentManager({ onClose }) {
 
       if (nodeErr) throw nodeErr;
 
-      if (selectedNode.type === 'CHALLENGE' && challenge) {
+      if ((selectedNode.type === 'CHALLENGE' || selectedNode.type === 'FINAL') && challenge) {
         const { error: chalErr } = await supabase
           .from('challenges')
           .upsert(challenge);
@@ -373,6 +433,32 @@ export default function AdminContentManager({ onClose }) {
           >
             <ShieldAlert size={13} /> Moderace
           </button>
+          {[
+            { key: 'kpi', label: 'KPI', Icon: BarChart3 },
+            { key: 'catalogs', label: 'Katalogy', Icon: SlidersHorizontal },
+            { key: 'review', label: 'Kontrola', Icon: Flag },
+          ].map(({ key, label, Icon }) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                borderRadius: '8px',
+                border: 'none',
+                background: activeTab === key ? '#7C3AED' : 'transparent',
+                color: activeTab === key ? '#fff' : '#6B6B8A',
+                fontFamily: 'Inter',
+                fontWeight: '600',
+                fontSize: '12px',
+                cursor: 'pointer'
+              }}
+            >
+              <Icon size={13} /> {label}
+            </button>
+          ))}
         </div>
 
         <div style={{ display: 'flex', gap: '8px' }}>
@@ -527,7 +613,7 @@ export default function AdminContentManager({ onClose }) {
                           checked={selectedNode.requires_pass || false}
                           onChange={(e) => setSelectedNode({ ...selectedNode, requires_pass: e.target.checked })}
                         />
-                        Vyžaduje Hra Pass 🔒
+                        Vyžaduje Founder Pass 🔒
                       </label>
                     </div>
 
@@ -569,10 +655,61 @@ export default function AdminContentManager({ onClose }) {
                     </div>
                   </div>
 
-                  {selectedNode.type === 'CHALLENGE' && challenge && (
+                  {(selectedNode.type === 'CHALLENGE' || selectedNode.type === 'FINAL') && challenge && (
                     <div style={{ background: '#15111E', border: '1px solid #1C1630', borderRadius: '16px', padding: '20px' }}>
-                      <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '16px', color: '#fff', marginBottom: '16px' }}>
+                      <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '16px', color: '#fff', marginBottom: '12px' }}>
                         Nastavení výzvy (Challenge)
+                      </div>
+
+                      {/* Loops of this node */}
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
+                        {(nodeLoops.length ? nodeLoops : [challenge]).map(loop => (
+                          <button key={loop.id} type="button" onClick={() => selectLoop(loop)}
+                            style={{ background: loop.id === challenge.id ? '#7C3AED' : '#1C1630', color: '#fff', border: '1px solid #382C5C', borderRadius: '8px', padding: '6px 10px', fontFamily: 'Inter', fontSize: '12px', cursor: 'pointer' }}>
+                            Loop {loop.loop_order || 1}{loop.is_mandatory === false ? ' · volitelný' : ''}
+                          </button>
+                        ))}
+                        <button type="button" onClick={handleAddLoop}
+                          style={{ background: 'transparent', color: '#A78BFA', border: '1px dashed #A78BFA', borderRadius: '8px', padding: '6px 10px', fontFamily: 'Inter', fontSize: '12px', cursor: 'pointer' }}>
+                          + Přidat loop
+                        </button>
+                      </div>
+
+                      {/* Quest metadata (Game Bible · Progression "QUEST METADATA") */}
+                      <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: '140px' }}>
+                          <label style={{ display: 'block', fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', textTransform: 'uppercase', marginBottom: '6px' }}>Typ questu</label>
+                          <select value={challenge.quest_type || 'standard'} onChange={(e) => setChallenge({ ...challenge, quest_type: e.target.value })}
+                            style={{ width: '100%', height: '42px', background: '#0D0A18', border: '1px solid #382C5C', borderRadius: '10px', padding: '0 10px', color: '#fff', fontFamily: 'Inter', fontSize: '13px' }}>
+                            <option value="micro">Micro (10 XP)</option>
+                            <option value="standard">Standard (25 XP)</option>
+                            <option value="deep">Deep (50 XP)</option>
+                            <option value="milestone">Milestone (100 XP)</option>
+                            <option value="loop">Loop completed (100 XP)</option>
+                            <option value="mastery">Mastery (150 XP)</option>
+                            <option value="community">Community (50–150 XP)</option>
+                            <option value="world">World (100–250 XP)</option>
+                          </select>
+                        </div>
+                        <div style={{ width: '110px' }}>
+                          <label style={{ display: 'block', fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', textTransform: 'uppercase', marginBottom: '6px' }}>Pořadí loopu</label>
+                          <input type="number" min="1" value={challenge.loop_order || 1} onChange={(e) => setChallenge({ ...challenge, loop_order: Math.max(1, parseInt(e.target.value) || 1) })}
+                            style={{ width: '100%', height: '42px', background: '#0D0A18', border: '1px solid #382C5C', borderRadius: '10px', padding: '0 12px', color: '#fff', fontFamily: 'Inter', fontSize: '13px' }} />
+                        </div>
+                        <div style={{ width: '110px' }}>
+                          <label style={{ display: 'block', fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', textTransform: 'uppercase', marginBottom: '6px' }}>Čas (min)</label>
+                          <input type="number" min="1" value={challenge.estimated_minutes ?? ''} onChange={(e) => setChallenge({ ...challenge, estimated_minutes: e.target.value === '' ? null : Math.max(1, parseInt(e.target.value) || 1) })}
+                            style={{ width: '100%', height: '42px', background: '#0D0A18', border: '1px solid #382C5C', borderRadius: '10px', padding: '0 12px', color: '#fff', fontFamily: 'Inter', fontSize: '13px' }} />
+                        </div>
+                        <div style={{ width: '110px' }}>
+                          <label style={{ display: 'block', fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', textTransform: 'uppercase', marginBottom: '6px' }}>Obtížnost 1–5</label>
+                          <input type="number" min="1" max="5" value={challenge.difficulty ?? ''} onChange={(e) => setChallenge({ ...challenge, difficulty: e.target.value === '' ? null : Math.min(5, Math.max(1, parseInt(e.target.value) || 1)) })}
+                            style={{ width: '100%', height: '42px', background: '#0D0A18', border: '1px solid #382C5C', borderRadius: '10px', padding: '0 12px', color: '#fff', fontFamily: 'Inter', fontSize: '13px' }} />
+                        </div>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'Inter', fontSize: '12px', color: '#9A9AB5', alignSelf: 'flex-end', height: '42px', cursor: 'pointer' }}>
+                          <input type="checkbox" checked={challenge.is_mandatory !== false} onChange={(e) => setChallenge({ ...challenge, is_mandatory: e.target.checked })} />
+                          Povinný pro postup
+                        </label>
                       </div>
 
                       <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
@@ -767,8 +904,16 @@ export default function AdminContentManager({ onClose }) {
                     }}
                   />
                 </div>
-                <div style={{ color: '#6B6B8A', fontSize: '13px' }}>
-                  Nalezeno: <span style={{ color: '#fff', fontWeight: '600' }}>{filteredPlayers.length}</span> hráčů
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <div style={{ color: '#6B6B8A', fontSize: '13px' }}>
+                    Nalezeno: <span style={{ color: '#fff', fontWeight: '600' }}>{filteredPlayers.length}</span> hráčů
+                  </div>
+                  <button
+                    onClick={exportPlayersCsv}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', color: '#A78BFA', border: '1px solid #382C5C', borderRadius: '10px', padding: '8px 12px', fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', cursor: 'pointer' }}
+                  >
+                    <Download size={13} /> Export CSV
+                  </button>
                 </div>
               </div>
 
@@ -839,7 +984,8 @@ export default function AdminContentManager({ onClose }) {
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '20px',
-                flexShrink: 0
+                flexShrink: 0,
+                overflowY: 'auto'
               }}>
                 <div>
                   <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', textTransform: 'uppercase', letterSpacing: '.08em' }}>Editace hráče</div>
@@ -879,7 +1025,7 @@ export default function AdminContentManager({ onClose }) {
                       checked={selectedPlayer.pass_holder || false}
                       onChange={(e) => setSelectedPlayer({ ...selectedPlayer, pass_holder: e.target.checked })}
                     />
-                    Aktivní HRA PASS 🎫
+                    Aktivní Founder Pass 🎫
                   </label>
 
                   <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Inter', fontSize: '12px', color: '#9A9AB5' }}>
@@ -930,6 +1076,10 @@ export default function AdminContentManager({ onClose }) {
                     {saving ? 'Ukládám...' : 'Uložit hráče'}
                   </button>
                 </div>
+
+                <div style={{ borderTop: '1px solid #1B1430', paddingTop: '16px' }}>
+                  <AdminPlayerDetail playerId={selectedPlayer.id} />
+                </div>
               </div>
             )}
           </div>
@@ -940,6 +1090,21 @@ export default function AdminContentManager({ onClose }) {
         {/* ==================================================== */}
         {activeTab === 'moderation' && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '24px', overflowY: 'auto' }}>
+            {/* World / System card for the feed (Feed Engine MVP1) */}
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '18px', alignItems: 'flex-start' }}>
+              <textarea
+                value={worldText}
+                onChange={(e) => setWorldText(e.target.value)}
+                maxLength={600}
+                rows={2}
+                placeholder="World karta do feedu (např. „Portál je otevřen do neděle.“)"
+                style={{ flex: 1, background: '#0D0A18', border: '1px solid #38BDF8', borderRadius: '10px', padding: '10px 12px', color: '#fff', fontFamily: 'Inter', fontSize: '13px', resize: 'vertical' }}
+              />
+              <button type="button" onClick={handlePublishWorld} disabled={!worldText.trim()}
+                style={{ height: '42px', background: '#0EA5E9', color: '#fff', border: 'none', borderRadius: '10px', padding: '0 14px', fontFamily: 'Inter', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
+                Publikovat
+              </button>
+            </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <div style={{ position: 'relative', flex: 1, maxWidth: '400px' }}>
                 <span style={{ position: 'absolute', left: '12px', top: '12px', color: '#6B6B8A' }}><Search size={16} /></span>
@@ -1049,6 +1214,10 @@ export default function AdminContentManager({ onClose }) {
             </div>
           </div>
         )}
+
+        {activeTab === 'kpi' && <AdminKpi />}
+        {activeTab === 'catalogs' && <AdminCatalogs />}
+        {activeTab === 'review' && <AdminReview />}
 
       </div>
     </div>

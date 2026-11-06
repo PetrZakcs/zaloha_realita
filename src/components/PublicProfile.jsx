@@ -5,6 +5,8 @@ import { track } from '../lib/analytics';
 import { ALL_CARDS } from '../lib/cards';
 import { getAvatarLevel } from '../lib/avatarLevels';
 import { ArrowLeft, Crown, Flame } from 'lucide-react';
+import PlayerAvatar from './common/PlayerAvatar';
+import ProfileIdentitySection from './common/ProfileIdentitySection';
 
 // Read-only public profile (MVP1 spec-6 §10 / spec-10 "PROFIL HRÁČE (VEŘEJNÝ)") — reached by
 // tapping an avatar/name in the feed. Deliberately a single component, not split into
@@ -88,23 +90,7 @@ export default function PublicProfile() {
             const level = getAvatarLevel(profile.avatar_level);
             return (
               <>
-                <span style={{
-                  width: '78px',
-                  height: '78px',
-                  borderRadius: '50%',
-                  background: '#241C3C',
-                  border: `${level.borderWidth}px solid ${level.border}`,
-                  boxShadow: level.glow ? `0 0 ${level.glow}px ${level.border}88` : 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontFamily: "'Space Grotesk', sans-serif",
-                  fontWeight: '700',
-                  fontSize: '24px',
-                  color: level.color
-                }}>
-                  {(profile.display_name || 'H').slice(0, 2).toUpperCase()}
-                </span>
+                <PlayerAvatar name={profile.display_name} avatarUrl={profile.avatar_url} auraColor={profile.aura_color} maskTitle={profile.mask_title} level={profile.avatar_level} frameKey={profile.active_frame} npc={profile.onboarding_completed === false} size={78} />
 
                 <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', marginTop: '12px', color: '#F0F0F8' }}>
                   {profile.display_name || 'Hráč'}
@@ -154,6 +140,10 @@ export default function PublicProfile() {
               </div>
             </div>
           )}
+
+          <div style={{ width: '100%', maxWidth: '360px', marginTop: '24px' }}>
+            <ProfileIdentitySection userId={userId} statusTitle={profile.status_title} passHolder={!!profile.pass_holder} />
+          </div>
 
           <div style={{ width: '100%', maxWidth: '360px', marginTop: '28px' }}>
             <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '11px', color: '#6B6B8A', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '10px' }}>

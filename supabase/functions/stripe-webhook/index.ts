@@ -2,7 +2,7 @@
 // Listens for Stripe webhooks and keeps profile.pass_holder in sync with the player's
 // Founder Pass subscription (granted on checkout, revoked when the subscription ends).
 //
-// Stripe dashboard → Webhooks must send: checkout.session.completed,
+// Stripe dashboard → Webhooks must send: checkout.session.completed, invoice.paid,
 // customer.subscription.updated, customer.subscription.deleted.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -52,6 +52,7 @@ export function createHandler(
 
       const handled = new Set([
         "checkout.session.completed",
+        "invoice.paid",
         "customer.subscription.updated",
         "customer.subscription.deleted",
       ]);
@@ -86,6 +87,8 @@ export function createHandler(
 
       const result = event.type === "checkout.session.completed"
         ? await handleCheckoutCompleted(supabase, event.data.object)
+        : event.type === "invoice.paid"
+        ? await handleInvoicePaid(supabase, event.data.object)
         : await handleSubscriptionChange(supabase, event.data.object);
 
       if (!result.ok) {
@@ -201,6 +204,45 @@ async function handleCheckoutCompleted(supabase: Db, session: StripeObject): Pro
     }
   }
 
+  return { ok: true };
+}
+
+// Every paid Pass invoice (first payment and renewals): logs it for the renewal KPI and gives
+// the inviter their recurring in-game reward. record_pass_payment() is idempotent per invoice.
+async function handleInvoicePaid(supabase: Db, invoice: StripeObject): Promise<{ ok: boolean }> {
+  const subscriptionId = invoice.subscription as string | null;
+  if (!subscriptionId) return { ok: true };
+
+  const { data: row, error: lookupError } = await supabase
+    .from("subscriptions")
+    .select("user_id")
+    .eq("stripe_subscription_id", subscriptionId)
+    .maybeSingle();
+  if (lookupError) {
+    console.error(`Failed to look up subscription ${subscriptionId}:`, lookupError);
+    return { ok: false };
+  }
+
+  // Stripe doesn't order events: the first invoice can arrive before checkout.session.completed
+  // has written the subscriptions row, so the metadata copied onto the invoice is the fallback.
+  const userId: string | undefined = row?.user_id ??
+    invoice.subscription_details?.metadata?.user_id ?? invoice.metadata?.user_id;
+  if (!userId) {
+    // Not ok on purpose: the claim is released and Stripe retries once checkout has linked it.
+    console.warn(`Invoice ${invoice.id} is not linked to a player yet, asking Stripe to retry`);
+    return { ok: false };
+  }
+
+  const { error } = await supabase.rpc("record_pass_payment", {
+    p_user_id: userId,
+    p_invoice_id: invoice.id,
+    p_amount_czk: Math.round((invoice.amount_paid || 0) / 100),
+    p_billing_reason: invoice.billing_reason ?? null,
+  });
+  if (error) {
+    console.error(`Failed to record payment for invoice ${invoice.id}:`, error);
+    return { ok: false };
+  }
   return { ok: true };
 }
 

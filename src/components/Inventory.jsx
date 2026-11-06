@@ -3,7 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import { buildCatalog, isCardUnlocked } from '../lib/cards';
 import { getAvatarLevel } from '../lib/avatarLevels';
+import { FRAMES, isFrameUnlocked } from '../lib/frames';
+import IdentitySlots from './common/IdentitySlots';
+import { track } from '../lib/analytics';
 import { ArrowLeft, Lock, KeyRound, Zap, Check, Gift } from 'lucide-react';
+import PlayerAvatar from './common/PlayerAvatar';
+
+const ALBUM_URL = process.env.REACT_APP_ALBUM_URL || 'https://album.hrareality.cz';
 
 // "Inventář" (MVP1 spec-10) — the other half of the Profil/Inventář split: "PROFIL = co
 // ukazuju (výběr), INVENTÁŘ = co vlastním (celek)". A single component, not split into
@@ -21,8 +27,9 @@ export default function Inventory() {
     mysteryBoxes,
     boxPool,
     fetchMysteryBoxes,
-    openModal
-  } = useUserStore();
+    openModal,
+    setActiveFrame, ownIdentityVisual } = useUserStore();
+  const [frameBusy, setFrameBusy] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [pendingShowcase, setPendingShowcase] = useState(user?.showcaseCardKeys || []);
@@ -85,24 +92,7 @@ export default function Inventory() {
 
       {/* SEKCE 1 — Aktivní identita */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginTop: '24px', background: '#1C1630', border: '0.5px solid #382C5C', borderRadius: '18px', padding: '16px' }}>
-        <span style={{
-          width: '64px',
-          height: '64px',
-          borderRadius: '50%',
-          background: '#241C3C',
-          border: `${level.borderWidth}px solid ${level.border}`,
-          boxShadow: level.glow ? `0 0 ${level.glow}px ${level.border}66` : 'none',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontFamily: "'Space Grotesk', sans-serif",
-          fontWeight: '700',
-          fontSize: '20px',
-          color: level.color,
-          flexShrink: 0
-        }}>
-          {(user?.name || 'H').slice(0, 2).toUpperCase()}
-        </span>
+        <PlayerAvatar name={user?.name} avatarUrl={user?.avatarUrl} {...ownIdentityVisual()} level={user?.badges_count} frameKey={user?.activeFrame} npc={user?.onboardingCompleted === false} size={64} />
         <div>
           <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', color: '#6B6B8A', textTransform: 'uppercase', letterSpacing: '.08em' }}>
             Aktivní identita · Level {level.level}
@@ -112,6 +102,49 @@ export default function Inventory() {
           </div>
         </div>
       </div>
+
+      {/* Rámečky (spec-12 §2.4 "3–5 odemykatelných rámečků", spec-21 §4 "možnost přepnout") */}
+      <div style={{ marginTop: '14px' }}>
+        <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '11px', letterSpacing: '.1em', textTransform: 'uppercase', color: '#6B6B8A', marginBottom: '10px' }}>
+          Rámečky
+        </div>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          {FRAMES.map(frame => {
+            const unlocked = isFrameUnlocked(frame, { level: user?.badges_count || 0, passHolder: !!user?.passHolder });
+            const active = user?.activeFrame === frame.key;
+            return (
+              <button
+                key={frame.key}
+                type="button"
+                disabled={!unlocked || frameBusy}
+                onClick={async () => {
+                  setFrameBusy(true);
+                  await setActiveFrame(active ? null : frame.key);
+                  setFrameBusy(false);
+                }}
+                title={unlocked ? (active ? 'Sundat rámeček' : 'Nasadit rámeček') : (frame.requiresPass ? 'Jen s Founder Passem' : `Odemkneš na úrovni ${frame.requiredLevel}`)}
+                style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', background: 'none',
+                  border: 'none', cursor: unlocked ? 'pointer' : 'not-allowed', opacity: unlocked ? 1 : 0.4, padding: 0
+                }}
+              >
+                <span style={{
+                  width: '44px', height: '44px', borderRadius: '50%', background: '#241C3C',
+                  border: `${frame.width}px solid ${frame.border}`, boxShadow: active ? `0 0 ${frame.glow}px ${frame.border}` : 'none',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6B6B8A'
+                }}>
+                  {!unlocked && <Lock size={14} />}
+                  {active && <Check size={16} color={frame.border} />}
+                </span>
+                <span style={{ fontFamily: 'Inter', fontSize: '10px', color: active ? '#F0F0F8' : '#9A9AB5' }}>{frame.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Identity slots (Game Bible · Identity MVP1: title, aura, mask) */}
+      <IdentitySlots />
 
       {/* Mystery boxy (spec-12 §2.1: box za každý 3. klíč) */}
       <button
@@ -127,6 +160,24 @@ export default function Inventory() {
           {mysteryBoxes.length > 0 ? `Mystery Boxy k otevření: ${mysteryBoxes.length}` : 'Mystery Box získáš za každé 3 klíče'}
         </span>
       </button>
+
+      {/* spec-12 §4.1 "Artefakty (Propojit do alba)" — the Season 0 album lives on
+          album.hrareality.cz (Discord login). */}
+      <a
+        href={ALBUM_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={() => track('album_link_clicked')}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '12px', marginTop: '10px', textDecoration: 'none',
+          background: '#1C1630', border: '1px solid #382C5C', borderRadius: '16px', padding: '12px 16px'
+        }}
+      >
+        <span style={{ flex: 1, fontFamily: 'Inter', fontSize: '13px', color: '#F0F0F8' }}>
+          Sběratelské album Season 0 <span style={{ color: '#6B6B8A', fontSize: '11px' }}>· přihlášení přes Discord</span>
+        </span>
+        <span style={{ fontFamily: 'Inter', fontSize: '13px', color: '#A78BFA' }}>Otevřít →</span>
+      </a>
 
       {/* SEKCE 2 — Karty */}
       <div style={{ marginTop: '26px' }}>

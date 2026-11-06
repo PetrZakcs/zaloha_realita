@@ -22,7 +22,7 @@ export default function MobileLeaderboard() {
         flexShrink: 0
       }}>
         <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '20px', color: '#F0F0F8' }}>
-          Žebříček
+          Komunita
         </span>
         <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: '#A78BFA' }}>
           Season 0

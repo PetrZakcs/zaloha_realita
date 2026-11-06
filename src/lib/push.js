@@ -25,8 +25,8 @@ export async function getPushStatus() {
   if (!isPushSupported()) return 'unsupported';
   if (Notification.permission === 'denied') return 'denied';
   try {
-    const registration = await navigator.serviceWorker.ready;
-    const subscription = await registration.pushManager.getSubscription();
+    const registration = await navigator.serviceWorker.getRegistration();
+    const subscription = await registration?.pushManager.getSubscription();
     return subscription ? 'subscribed' : 'not-subscribed';
   } catch (e) {
     return 'not-subscribed';
@@ -78,8 +78,9 @@ export async function subscribeToPush() {
 export async function unsubscribeFromPush() {
   if (!isPushSupported()) return { success: true };
   try {
-    const registration = await navigator.serviceWorker.ready;
-    const subscription = await registration.pushManager.getSubscription();
+    // Not .ready: that never resolves without a registered worker, and logout awaits this.
+    const registration = await navigator.serviceWorker.getRegistration();
+    const subscription = await registration?.pushManager.getSubscription();
     if (subscription) {
       const endpoint = subscription.endpoint;
       await subscription.unsubscribe();

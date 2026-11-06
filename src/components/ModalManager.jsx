@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/userStore';
 import { supabase } from '../api/supabaseClient';
@@ -8,11 +8,17 @@ import { ALL_CARDS, isCardUnlocked } from '../lib/cards';
 import { keysLabel } from '../lib/plural';
 import { getAvatarLevel } from '../lib/avatarLevels';
 import MysteryBoxModal from './modals/MysteryBoxModal';
+import ShareMomentButton from './common/ShareMomentButton';
+import ActivationModal from './modals/ActivationModal';
+import TryTooModal from './modals/TryTooModal';
+import NotificationsPanel from './modals/NotificationsPanel';
+import IdentityReveal from './modals/IdentityReveal';
 import { getPushStatus, subscribeToPush, unsubscribeFromPush } from '../lib/push';
 import { startCheckout } from '../lib/checkout';
+import { isSoundMuted, playSound, setSoundMuted } from '../lib/sfx';
 import {
   X, Check, KeyRound, Lock, Crown, ArrowRight, Shield, Zap,
-  ImageIcon, Globe, Bell, Sparkles, Loader2, Volume2, Clock, Share2, Users, Sunrise
+  ImageIcon, Globe, Bell, Sparkles, Loader2, Volume2, VolumeX, Clock, Share2, Users, Sunrise, Rocket, Award, LogOut, Trash2
 } from 'lucide-react';
 import OnboardingFlow from './modals/OnboardingFlow';
 import SeasonReflectionFlow from './modals/SeasonReflectionFlow';
@@ -28,20 +34,26 @@ export default function ModalManager() {
     sessionChecked,
     activeModal,
     activeChallenge,
+    activeNodeLoops,
     activeStoryNode,
     closeModal,
     openModal,
     updateUser,
     submitProof,
     mockLogs,
-    resetProgress,
+    logout,
+    deleteAccount,
+    passActivation,
+    activeStoryNodeSteps,
+    allStoryNodes,
     unlockedCards,
-    proofsSubmittedCount,
     advanceNode,
     referralSignupsCount,
     fetchReferralStats,
     changeDisplayNameOnce,
     welcomeBackDays,
+    playerProgress,
+    identityReveal,
     proofError,
     lastReward,
     mysteryBoxes
@@ -60,6 +72,10 @@ export default function ModalManager() {
   const [pushBusy, setPushBusy] = useState(false);
   const [passPlan, setPassPlan] = useState('monthly'); // 'monthly' | 'yearly'
   const [portalBusy, setPortalBusy] = useState(false);
+  const [soundMuted, setSoundMutedState] = useState(() => isSoundMuted());
+  const [deleteStep, setDeleteStep] = useState(0); // 0 | 1 (asked to confirm)
+  const [deleteError, setDeleteError] = useState('');
+  const questStartedAt = useRef(null);
 
   // "Zrušíš kdykoliv" — Stripe Customer Portal via the stripe-portal edge function.
   const openBillingPortal = async () => {
@@ -82,6 +98,11 @@ export default function ModalManager() {
     }
   };
 
+  // Identity reveal waits until no other modal (e.g. the quest celebration) is open.
+  useEffect(() => {
+    if (identityReveal && !activeModal) openModal('identity-reveal');
+  }, [identityReveal, activeModal, openModal]);
+
   // Sync temp name when user store updates
   useEffect(() => {
     if (user?.name) {
@@ -92,6 +113,9 @@ export default function ModalManager() {
   // XP countup state
   const [xpDisplay, setXpDisplay] = useState(0);
   useEffect(() => {
+    if (activeModal === 'celebration-xp') playSound('reward');
+    if (activeModal === 'celebration-badge') playSound('levelUp');
+    if (activeModal === 'pass-activated' && passActivation === 'active') playSound('levelUp');
     if (activeModal === 'celebration-xp' || activeModal === 'success-overlay') {
       const target = user?.xp || 0;
       const start = Math.max(0, target - (lastReward?.xpGained || 0));
@@ -107,7 +131,7 @@ export default function ModalManager() {
       }, 30);
       return () => clearInterval(timer);
     }
-  }, [activeModal, user?.xp, lastReward?.xpGained]);
+  }, [activeModal, user?.xp, lastReward?.xpGained, passActivation]);
 
   // Referral count/link is shown in both the paywall's earn-to-unlock CTA and Settings —
   // refresh it whenever either opens instead of only once at login, so a milestone reward
@@ -118,13 +142,15 @@ export default function ModalManager() {
       fetchReferralStats();
     }
     if (activeModal === 'settings') {
+      setDeleteStep(0);
+      setDeleteError('');
       getPushStatus().then(setPushStatus);
     }
   }, [activeModal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (activeModal === 'welcome-back') {
-      track('welcome_back_shown', { days: welcomeBackDays });
+      track('welcome_back_shown', { days: welcomeBackDays, absence_state: playerProgress?.absence_state || null });
     }
   }, [activeModal]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -135,6 +161,7 @@ export default function ModalManager() {
       track('challenge_viewed', { node: user?.uzel, challenge_id: activeChallenge?.id });
     }
     if (activeModal === 'proof-upload') {
+      questStartedAt.current = Date.now();
       track('challenge_started', { node: user?.uzel, challenge_id: activeChallenge?.id });
     }
   }, [activeModal]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -215,6 +242,28 @@ export default function ModalManager() {
     return <OnboardingFlow />;
   }
 
+  // The Glitch Moment plays instead of the node transition and hands over to it when closed, so
+  // the paywall (which advancing the 3rd node opens) can't overwrite it mid-animation.
+  const finishGlitchMoment = () => {
+    closeModal();
+    advanceNode();
+  };
+
+  const finishCelebration = async () => {
+    if (lastReward?.proofNumber === 3 && !lastReward?.alreadyCompleted && !localStorage.getItem('glitchMomentShown')) {
+      localStorage.setItem('glitchMomentShown', 'true');
+      openModal('glitch-moment');
+      return;
+    }
+    await advanceNode();
+    // spec-17 §3: onboarding → first quest → first proof → first reward → feed.
+    if (lastReward?.firstQuest) navigate('/feed');
+  };
+
+  const monthlyPrice = user?.passLapsed ? 199 : 149;
+  const totalNodes = allStoryNodes.length || 9;
+  const lastQuestNode = allStoryNodes.filter(n => n.type === 'CHALLENGE').slice(-1)[0]?.node_order;
+
   // STANDARD ACTIVE MODALS (Onboarded is true)
   return (
     <div style={{
@@ -246,7 +295,7 @@ export default function ModalManager() {
         {/* Close Icon top right */}
         {activeModal !== 'mock-loader' && (
           <span 
-            onClick={closeModal}
+            onClick={activeModal === 'glitch-moment' ? finishGlitchMoment : closeModal}
             style={{
               position: 'absolute',
               top: '16px',
@@ -263,15 +312,15 @@ export default function ModalManager() {
         )}
 
         {/* MODAL 1: Challenge Detail */}
-        {activeModal === 'challenge-detail' && (
+        {activeModal === 'challenge-detail' && activeChallenge && (
           <div>
             <div style={{ height: '120px', borderRadius: '16px', background: 'repeating-linear-gradient(135deg,#1C1630,#1C1630 10px,#241C3C 10px,#241C3C 20px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px', marginBottom: '14px', flexShrink: 0 }}>
               <ImageIcon size={24} style={{ color: '#22C55E' }} />
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '9px', color: '#6B6B8A' }}>ILUSTRACE QUESTU · Environment</span>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '9px', color: '#6B6B8A' }}>Uzel {user?.uzel ?? 1} / {totalNodes}</span>
             </div>
             
             <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#8B5CF6' }}>
-              Uzel {user?.uzel ?? 3} · Mikro-akce
+              Uzel {user?.uzel ?? 1}{activeNodeLoops.length > 1 ? ` · Loop ${(activeNodeLoops.findIndex(l => l.id === activeChallenge.id) + 1) || 1}/${activeNodeLoops.length}` : ''}{activeChallenge.estimated_minutes ? ` · ~${activeChallenge.estimated_minutes} min` : ''}
             </div>
             <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '22px', marginTop: '6px', color: '#fff' }}>
               {activeChallenge.title}
@@ -282,31 +331,29 @@ export default function ModalManager() {
               </span>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#7C3AED' }}></span>
-                <span style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F0F0F8' }}>Najdi 3 odhozené kusy odpadu</span>
+            {activeChallenge.why_text && (
+              <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#A78BFA', marginTop: '10px', lineHeight: 1.5 }}>
+                Proč: {activeChallenge.why_text}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#7C3AED' }}></span>
-                <span style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F0F0F8' }}>Vhoď je do nejbližšího koše</span>
+            )}
+
+            {activeStoryNodeSteps.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px' }}>
+                {activeStoryNodeSteps.map(step => (
+                  <div key={step.id} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#7C3AED', flexShrink: 0 }}></span>
+                    <span style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F0F0F8' }}>{step.text}</span>
+                  </div>
+                ))}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#7C3AED' }}></span>
-                <span style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F0F0F8' }}>Zachyť to a odeslů důkaz</span>
-              </div>
-            </div>
+            )}
 
             <div style={{ marginTop: '18px' }}>
               <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', color: '#6B6B8A', marginBottom: '8px' }}>Odměny za splnění:</div>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <div style={{ flex: 1, background: '#2A1E10', border: '1px solid #F5B73F', borderRadius: '12px', padding: '10px 4px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
                   <KeyRound size={16} style={{ color: '#F5B73F' }} />
-                  <span style={{ fontFamily: 'Inter', fontSize: '10px', color: '#F5B73F', fontWeight: '600' }}>+{activeChallenge.reward_keys} klíče</span>
-                </div>
-                <div style={{ flex: 1, background: '#241a3d', border: '0.5px solid #7C3AED', borderRadius: '12px', padding: '10px 4px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-                  <Shield size={16} style={{ color: '#A78BFA' }} />
-                  <span style={{ fontFamily: 'Inter', fontSize: '10px', color: '#A78BFA', fontWeight: '600' }}>Rare Badge</span>
+                  <span style={{ fontFamily: 'Inter', fontSize: '10px', color: '#F5B73F', fontWeight: '600' }}>+{keysLabel(activeChallenge.reward_keys)} (veřejný)</span>
                 </div>
                 <div style={{ flex: 1, background: '#14223D', border: '0.5px solid #4AA8FF', borderRadius: '12px', padding: '10px 4px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
                   <Zap size={16} style={{ color: '#4AA8FF' }} />
@@ -371,7 +418,7 @@ export default function ModalManager() {
                   cursor: 'pointer'
                 }}
               >
-                <ImageIcon size={13} /> Foto
+                <ImageIcon size={13} /> Foto / video
               </button>
               <button
                 onClick={() => setProofMode('text')}
@@ -402,7 +449,7 @@ export default function ModalManager() {
                   border: '1.5px dashed #7C3AED',
                   borderRadius: '16px',
                   height: '160px',
-                  background: photoPreviewUrl
+                  background: photoPreviewUrl && !photoFile?.type?.startsWith('video/')
                     ? `center / cover no-repeat url(${photoPreviewUrl})`
                     : 'repeating-linear-gradient(135deg,#1C1630,#1C1630 10px,#241C3C 10px,#241C3C 20px)',
                   display: 'flex',
@@ -416,8 +463,7 @@ export default function ModalManager() {
               >
                 <input
                   type="file"
-                  accept="image/*"
-                  capture="environment"
+                  accept="image/*,video/*"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
@@ -428,11 +474,17 @@ export default function ModalManager() {
                   }}
                   style={{ display: 'none' }}
                 />
+                {photoPreviewUrl && photoFile?.type?.startsWith('video/') && (
+                  <video src={photoPreviewUrl} muted playsInline controls style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', borderRadius: '14px', background: '#000' }} />
+                )}
                 {!photoPreviewUrl && (
                   <>
                     <ImageIcon size={28} style={{ color: '#6B6B8A' }} />
                     <span style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A' }}>
-                      VYBRAT NEBO VYFOTIT DŮKAZ
+                      VYBRAT NEBO NATOČIT DŮKAZ
+                    </span>
+                    <span style={{ fontFamily: 'Inter', fontSize: '10px', color: '#4A3D6E' }}>
+                      foto max 10 MB · video max 50 MB
                     </span>
                   </>
                 )}
@@ -480,7 +532,7 @@ export default function ModalManager() {
                   cursor: 'pointer'
                 }}
               >
-                <Globe size={13} /> Veřejný (+{activeChallenge?.reward_keys ?? 1} {activeChallenge?.reward_keys === 1 ? 'klíč' : 'klíče'})
+                <Globe size={13} /> Veřejný (+{keysLabel(activeChallenge?.reward_keys ?? 1)})
               </button>
               <button 
                 onClick={() => setPublicToggle(false)}
@@ -517,7 +569,8 @@ export default function ModalManager() {
                 submitProof({
                   text: proofMode === 'text' ? textProof : '',
                   photoFile: proofMode === 'photo' ? photoFile : null,
-                  is_public: publicToggle
+                  is_public: publicToggle,
+                  startedAt: questStartedAt.current
                 });
               }}
               style={{
@@ -581,11 +634,13 @@ export default function ModalManager() {
               Fragment kódu získán.
             </div>
             <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', marginTop: '6px', lineHeight: '1.5' }}>
-              Udrž streak <span style={{ color: '#22C55E', fontWeight: '600' }}>3 dny</span> a odemkneš další fragment.
+              {user?.passHolder
+                ? <>Udrž streak <span style={{ color: '#22C55E', fontWeight: '600' }}>3 dny</span> a odemkneš další fragment.</>
+                : <>Další fragmenty a streak sbírají <span style={{ color: '#F5B73F', fontWeight: '600' }}>Founder hráči</span>.</>}
             </div>
 
             <button
-              onClick={closeModal}
+              onClick={finishGlitchMoment}
               style={{
                 width: '100%',
                 height: '46px',
@@ -600,7 +655,7 @@ export default function ModalManager() {
                 marginTop: '22px'
               }}
             >
-              Zavřít
+              Pokračovat
             </button>
           </div>
         )}
@@ -637,6 +692,9 @@ export default function ModalManager() {
         )}
 
         {activeModal === 'mystery-box' && <MysteryBoxModal />}
+        {activeModal === 'activation' && <ActivationModal />}
+        {activeModal === 'try-too' && <TryTooModal />}
+        {activeModal === 'identity-reveal' && <IdentityReveal />}
 
         {/* MODAL 4: Success Overlay */}
         {activeModal === 'success-overlay' && (
@@ -827,6 +885,72 @@ export default function ModalManager() {
               </button>
             )}
 
+            {/* spec-17 §14: sharing only at strong moments — here the first proof (+1 klíč, not
+                mandatory, 1 click). First box/title/mask, purchase and the certificate have
+                their own share buttons. */}
+            {lastReward?.firstQuest && (
+              <div style={{ width: '100%', marginTop: '14px' }}>
+                <ShareMomentButton
+                  variant={lastReward.hasMedia ? 'proof' : 'quest'}
+                  rewardSource={{ type: 'challenge', id: lastReward.challengeId }}
+                  questId={lastReward.challengeId}
+                  progressText={`Uzel ${user?.uzel ?? 1} / ${totalNodes}`}
+                  sentence={lastReward.proofText}
+                  label="Ukaž, že nejsi NPC"
+                />
+              </div>
+            )}
+
+            {/* Game Bible · Viral "RANK / MASTERY CARD" — only when the Lifetime Level went up */}
+            {(lastReward?.lifetimeLevelAfter || 0) > (lastReward?.lifetimeLevelBefore || 0) && (
+              <div style={{ width: '100%', marginTop: '10px' }}>
+                <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#4AA8FF', fontWeight: 700, marginBottom: '8px' }}>
+                  Level {lastReward.lifetimeLevelAfter}!
+                </div>
+                <ShareMomentButton variant="rank" progressText={`Level ${lastReward.lifetimeLevelAfter}`} label="Sdílet nový level" />
+              </div>
+            )}
+
+            {/* Game Bible · Retention "D1 RETURN HOOK" + "NEXT QUEST PREVIEW": the player leaves
+                knowing what's next and how close the next box is. */}
+            {playerProgress && !lastReward?.alreadyCompleted && (
+              <div style={{ width: '100%', background: '#1C1630', border: '0.5px solid #382C5C', borderRadius: '14px', padding: '10px 12px', marginTop: '14px', textAlign: 'left' }}>
+                {playerProgress.next_quest_title && (
+                  <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F0F0F8' }}>
+                    Další krok: <strong>{playerProgress.next_quest_title}</strong>
+                    {playerProgress.next_quest_minutes ? <span style={{ color: '#9A9AB5' }}> · ~{playerProgress.next_quest_minutes} min</span> : null}
+                  </div>
+                )}
+                <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#F5B73F', marginTop: '4px' }}>
+                  {playerProgress.keys_toward_box}/{playerProgress.keys_per_box} klíčů k dalšímu Mystery Boxu
+                </div>
+              </div>
+            )}
+
+            {/* spec-15: Pass seed after node 2, nudge after node 4, "regret sale" after the last
+                quest. Context only, never a gate. */}
+            {!user?.passHolder && !lastReward?.alreadyCompleted && lastReward?.node === 2 && (
+              <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#9A9AB5', marginTop: '14px', lineHeight: 1.5 }}>
+                Founder hráči mají zvýrazněné důkazy a plný přístup bez čekání.
+              </div>
+            )}
+            {!user?.passHolder && !lastReward?.alreadyCompleted && lastReward?.node === 4 && (
+              <button
+                onClick={() => { track('paywall_opened', { source: 'node_4_nudge' }); openModal('paywall'); }}
+                style={{ background: 'none', border: 'none', fontFamily: 'Inter', fontSize: '12px', color: '#F5B73F', marginTop: '14px', cursor: 'pointer', lineHeight: 1.5 }}
+              >
+                Chceš, aby tvůj důkaz byl ve feedu zvýrazněný? Founder Pass →
+              </button>
+            )}
+            {!user?.passHolder && !lastReward?.alreadyCompleted && lastReward?.node === lastQuestNode && (
+              <button
+                onClick={() => { track('paywall_opened', { source: 'regret_sale' }); openModal('paywall'); }}
+                style={{ background: '#1C1630', border: '0.5px solid #382C5C', borderRadius: '12px', padding: '10px 12px', fontFamily: 'Inter', fontSize: '12px', color: '#9A9AB5', marginTop: '14px', cursor: 'pointer', lineHeight: 1.5, textAlign: 'left' }}
+              >
+                S Passem bys tu měl(a) Founder rámeček, zvýrazněné důkazy, plný certifikát a výraznější finální status. <span style={{ color: '#F5B73F' }}>Zjistit víc →</span>
+              </button>
+            )}
+
             {/* spec-18 MOMENT 2 (3rd proof) and spec-19 §6 (5th proof) behaviour triggers */}
             {lastReward?.proofNumber === 3 && !user?.passHolder && (
               <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#A78BFA', marginTop: '14px', lineHeight: 1.5 }}>
@@ -843,15 +967,7 @@ export default function ModalManager() {
             )}
 
             <button
-              onClick={() => {
-                advanceNode();
-                if (proofsSubmittedCount === 3 && !localStorage.getItem('glitchMomentShown')) {
-                  localStorage.setItem('glitchMomentShown', 'true');
-                  openModal('glitch-moment');
-                } else {
-                  closeModal();
-                }
-              }}
+              onClick={finishCelebration}
               style={{
                 width: '100%',
                 height: '46px',
@@ -866,13 +982,54 @@ export default function ModalManager() {
                 marginTop: '22px'
               }}
             >
-              Návrat na Dashboard
+              Pokračovat
             </button>
           </div>
         )}
 
-        {/* MODAL 8: Paywall Hra Pass */}
-        {activeModal === 'paywall' && (
+        {/* MODAL: spec-20 "po nákupu: Status aktivován. Jsi Founder." */}
+        {activeModal === 'pass-activated' && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '12px' }}>
+            {passActivation === 'active' ? (
+              <>
+                <span style={{ width: '84px', height: '84px', borderRadius: '50%', background: '#2A1E10', border: '2px solid #F5B73F', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 32px rgba(245,183,63,.55)', animation: 'ringPulse 1.6s ease-out infinite' }}>
+                  <Crown size={40} style={{ color: '#F5B73F' }} />
+                </span>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', letterSpacing: '.12em', color: '#F5B73F', textTransform: 'uppercase' }}>Status aktivován</div>
+                <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '26px', color: '#fff' }}>Jsi Founder.</div>
+                <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', lineHeight: 1.5 }}>Máš Founder rámeček a značku, zvýrazněné důkazy a celou sezónu bez čekání.</div>
+                <ShareMomentButton variant="identity" rewardSource={{ type: 'pass', id: 'founder' }} progressText="Founder" label="Sdílet status" />
+                <button onClick={closeModal} style={{ width: '100%', height: '46px', background: '#F5B73F', color: '#2A1E10', fontFamily: 'Inter', fontWeight: '700', fontSize: '15px', border: 'none', borderRadius: '16px', cursor: 'pointer' }}>Pokračovat ve hře</button>
+              </>
+            ) : passActivation === 'delayed' ? (
+              <>
+                <Clock size={36} style={{ color: '#9A9AB5' }} />
+                <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '20px', color: '#fff' }}>Platbu jsme přijali</div>
+                <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', lineHeight: 1.5 }}>Aktivace trvá déle než obvykle. Pass se ti zapne sám, stačí za chvíli znovu otevřít aplikaci.</div>
+                <button onClick={closeModal} style={{ width: '100%', height: '46px', background: '#7C3AED', color: '#fff', fontFamily: 'Inter', fontWeight: '700', fontSize: '15px', border: 'none', borderRadius: '16px', cursor: 'pointer' }}>Rozumím</button>
+              </>
+            ) : (
+              <>
+                <Loader2 size={36} className="spin-ico" style={{ color: '#F5B73F' }} />
+                <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5' }}>Aktivuji tvůj Founder Pass…</div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* MODAL 8: Founder Pass. Every benefit listed here is real and implemented (spec-13:
+            "objektivní rozdíly, ne marketingové"). */}
+        {activeModal === 'paywall' && user?.passHolder && (
+          <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+            <Crown size={36} style={{ color: '#F5B73F' }} />
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '22px', color: '#fff' }}>Jsi Founder</div>
+            <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', lineHeight: 1.5 }}>Tvůj Founder Pass je aktivní. Celá sezóna bez čekání, zvýrazněné důkazy a plný certifikát.</div>
+            <button onClick={openBillingPortal} disabled={portalBusy} style={{ width: '100%', height: '42px', background: 'transparent', border: '1px solid #F5B73F', color: '#F5B73F', fontFamily: 'Inter', fontWeight: '600', fontSize: '13px', borderRadius: '12px', cursor: 'pointer', marginTop: '6px' }}>
+              {portalBusy ? 'Otevírám…' : 'Spravovat / zrušit předplatné'}
+            </button>
+          </div>
+        )}
+        {activeModal === 'paywall' && !user?.passHolder && (
           <div style={{ textAlign: 'center' }}>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '14px' }}>
               <span style={{
@@ -889,26 +1046,26 @@ export default function ModalManager() {
                 <Crown size={28} style={{ color: '#F5B73F' }} />
               </span>
             </div>
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '24px', color: '#fff' }}>
-              Odemkni HRA PASS
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '22px', color: '#fff', lineHeight: 1.2 }}>
+              Dostal ses dál než většina nových hráčů.
             </div>
             <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', marginTop: '6px', lineHeight: '1.45' }}>
-              Získej přístup k prémiovým sezónním výzvám, unikátním odznakům a celému příběhu se Zayou.
+              Teď se rozhoduje, jestli zůstaneš pozorovatel… nebo se staneš aktivním hráčem.
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px', textAlign: 'left' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#1C1630', borderRadius: '12px', padding: '10px 12px' }}>
-                <span style={{ color: '#F5B73F' }}><Sparkles size={16} /></span>
-                <span style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F0F0F8' }}>+12 exkluzivních výzev v sezóně</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#1C1630', borderRadius: '12px', padding: '10px 12px' }}>
-                <span style={{ color: '#F5B73F' }}><Shield size={16} /></span>
-                <span style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F0F0F8' }}>Legendární a Epic odznaky do profilu</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#1C1630', borderRadius: '12px', padding: '10px 12px' }}>
-                <span style={{ color: '#F5B73F' }}><Volume2 size={16} /></span>
-                <span style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F0F0F8' }}>Speciální efekty a zvuky v aplikaci</span>
-              </div>
+              {[
+                { Icon: Rocket, text: 'Celá sezóna hned, bez limitu 1 uzel denně' },
+                { Icon: Crown, text: 'Founder rámeček, značka a titul na profilu' },
+                { Icon: Sparkles, text: 'Zvýrazněné a viditelnější důkazy ve feedu' },
+                { Icon: Award, text: 'Plný certifikát po dokončení sezóny' },
+                { Icon: KeyRound, text: 'Streak a sbírání fragmentů kódu' },
+              ].map(({ Icon, text }) => (
+                <div key={text} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#1C1630', borderRadius: '12px', padding: '10px 12px' }}>
+                  <span style={{ color: '#F5B73F', display: 'inline-flex' }}><Icon size={16} /></span>
+                  <span style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F0F0F8' }}>{text}</span>
+                </div>
+              ))}
             </div>
 
             <div style={{
@@ -938,18 +1095,20 @@ export default function ModalManager() {
                   ))}
                 </div>
               )}
-              <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F5B73F' }}>{passPlan === 'yearly' ? 'Roční členství' : 'Měsíční členství'}</div>
+              <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F5B73F' }}>Founder Pass · {passPlan === 'yearly' ? 'roční' : 'měsíční'}</div>
               <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '26px', color: '#fff', marginTop: '4px' }}>
-                {passPlan === 'yearly' ? '999 Kč' : '149 Kč'} <span style={{ fontSize: '14px', color: '#9A9AB5', fontWeight: '500' }}>{passPlan === 'yearly' ? '/ rok' : '/ měsíc'}</span>
+                {passPlan === 'yearly' ? '999 Kč' : `${monthlyPrice} Kč`} <span style={{ fontSize: '14px', color: '#9A9AB5', fontWeight: '500' }}>{passPlan === 'yearly' ? '/ rok' : '/ měsíc'}</span>
               </div>
-              <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#9A9AB5', marginTop: '4px' }}>Zrušíš kdykoliv v Nastavení.</div>
+              <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#9A9AB5', marginTop: '4px' }}>
+                {passPlan === 'monthly' && !user?.passLapsed ? 'Tato cena ti zůstane, dokud Pass nezrušíš (pak 199 Kč). ' : ''}Zrušíš kdykoliv v Nastavení.
+              </div>
             </div>
 
             <button
               onClick={async () => {
                 const result = await startCheckout(passPlan);
                 if (result.error === 'no_session') {
-                  alert('Pro aktivaci Hra Passu se prosím nejdřív přihlas.');
+                  alert('Pro aktivaci Founder Passu se prosím nejdřív přihlas.');
                   closeModal();
                 } else if (result.error) {
                   alert('Platbu se nepodařilo zahájit. Zkus to prosím znovu později.');
@@ -969,7 +1128,7 @@ export default function ModalManager() {
                 marginTop: '18px'
               }}
             >
-              Aktivovat HRA PASS
+              Odemknout Founder Pass
             </button>
 
             {/* MVP1 spec soft-paywall: declining the Pass doesn't dead-end a free player —
@@ -1098,7 +1257,7 @@ export default function ModalManager() {
                 marginTop: '20px'
               }}
             >
-              Odemknout Hra Pass
+              Odemknout Founder Pass
             </button>
 
             <button
@@ -1127,6 +1286,30 @@ export default function ModalManager() {
             it only fires because the player already opened the app; that's the ceiling of
             what's possible without notification permissions + a scheduled sender. */}
         {activeModal === 'welcome-back' && (() => {
+          // Game Bible · Retention "COMEBACK ENGINE": 3+ days without a meaningful action →
+          // "Tvoje cesta zůstala tady", one small step, never guilt or an offer.
+          const comeback = playerProgress && playerProgress.absence_state !== 'active';
+          if (comeback) {
+            const pct = playerProgress.theme_total > 0 ? Math.round((playerProgress.theme_done / playerProgress.theme_total) * 100) : 0;
+            return (
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '20px', color: '#fff' }}>Vítej zpátky</div>
+                <div style={{ fontFamily: 'Inter', fontSize: '14px', color: '#F0F0F8', marginTop: '10px', lineHeight: '1.5' }}>Tvoje cesta zůstala tady.</div>
+                {playerProgress.node_title && (
+                  <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', marginTop: '6px' }}>
+                    Posledně jsi pracoval(a) na: <strong style={{ color: '#fff' }}>{playerProgress.node_title}</strong> — {pct} %
+                  </div>
+                )}
+                <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', marginTop: '6px' }}>Dnes můžeš pokračovat jedním krokem.</div>
+                <button
+                  onClick={() => { track('comeback_continue', { state: playerProgress.absence_state, days: playerProgress.days_since_meaningful }); closeModal(); navigate('/story'); }}
+                  style={{ width: '100%', height: '48px', background: '#7C3AED', color: '#fff', fontFamily: 'Inter', fontWeight: '700', fontSize: '15px', border: 'none', borderRadius: '16px', cursor: 'pointer', marginTop: '18px' }}
+                >
+                  Pokračovat
+                </button>
+              </div>
+            );
+          }
           const isD1 = welcomeBackDays === 1;
           return (
             <div style={{ textAlign: 'center' }}>
@@ -1193,7 +1376,7 @@ export default function ModalManager() {
                     marginTop: '10px'
                   }}
                 >
-                  Odemknout Hra Pass
+                  Odemknout Founder Pass
                 </button>
               )}
             </div>
@@ -1469,28 +1652,48 @@ export default function ModalManager() {
             )}
 
             <button
-              onClick={() => {
-                if (window.confirm('Opravdu chceš resetovat celou aplikaci a herní pokrok?')) {
-                  resetProgress();
-                  closeModal();
-                }
-              }}
-              style={{
-                width: '100%',
-                height: '40px',
-                background: 'transparent',
-                color: '#EF4444',
-                fontFamily: 'Inter',
-                fontWeight: '600',
-                fontSize: '13px',
-                border: '1px solid #EF4444',
-                borderRadius: '12px',
-                cursor: 'pointer',
-                marginTop: '10px'
-              }}
+              onClick={() => { setSoundMuted(!soundMuted); setSoundMutedState(!soundMuted); }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', width: '100%', height: '40px', background: 'transparent', color: '#9A9AB5', fontFamily: 'Inter', fontWeight: '600', fontSize: '13px', border: '1px solid #382C5C', borderRadius: '12px', cursor: 'pointer', marginTop: '10px' }}
             >
-              Resetovat pokrok
+              {soundMuted ? <><VolumeX size={15} /> Zvuky vypnuté</> : <><Volume2 size={15} /> Zvuky zapnuté</>}
             </button>
+
+            <button
+              onClick={async () => { closeModal(); await logout(); navigate('/'); }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', width: '100%', height: '40px', background: 'transparent', color: '#F0F0F8', fontFamily: 'Inter', fontWeight: '600', fontSize: '13px', border: '1px solid #382C5C', borderRadius: '12px', cursor: 'pointer', marginTop: '10px' }}
+            >
+              <LogOut size={15} /> Odhlásit se
+            </button>
+
+            {deleteStep === 0 ? (
+              <button
+                onClick={() => setDeleteStep(1)}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', width: '100%', height: '40px', background: 'transparent', color: '#EF4444', fontFamily: 'Inter', fontWeight: '600', fontSize: '13px', border: '1px solid #EF4444', borderRadius: '12px', cursor: 'pointer', marginTop: '10px' }}
+              >
+                <Trash2 size={15} /> Smazat účet
+              </button>
+            ) : (
+              <div style={{ border: '1px solid #EF4444', borderRadius: '12px', padding: '12px', marginTop: '10px' }}>
+                <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F0F0F8', lineHeight: 1.5 }}>
+                  Trvale smažeme tvůj účet, postup, důkazy a fotky. Vrátit to nejde.
+                </div>
+                {deleteError && <div role="alert" style={{ fontFamily: 'Inter', fontSize: '12px', color: '#EF4444', marginTop: '6px' }}>{deleteError}</div>}
+                <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                  <button onClick={() => setDeleteStep(0)} style={{ flex: 1, height: '36px', background: 'transparent', color: '#9A9AB5', border: '1px solid #382C5C', borderRadius: '10px', fontFamily: 'Inter', fontSize: '12px', cursor: 'pointer' }}>Zpět</button>
+                  <button
+                    onClick={async () => {
+                      setDeleteError('');
+                      const result = await deleteAccount();
+                      if (result.error) { setDeleteError(result.error); return; }
+                      navigate('/');
+                    }}
+                    style={{ flex: 1, height: '36px', background: '#EF4444', color: '#fff', border: 'none', borderRadius: '10px', fontFamily: 'Inter', fontWeight: '700', fontSize: '12px', cursor: 'pointer' }}
+                  >
+                    Smazat natrvalo
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div style={{ display: 'flex', justifyContent: 'center', gap: '14px', marginTop: '18px' }}>
               <a href="/terms" style={{ fontFamily: 'Inter', fontSize: '12px', color: '#6B6B8A', textDecoration: 'underline' }}>Obchodní podmínky</a>
@@ -1499,31 +1702,8 @@ export default function ModalManager() {
           </div>
         )}
 
-        {/* MODAL 10: Notifications */}
-        {activeModal === 'notifications' && (
-          <div>
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '18px', color: '#fff', marginBottom: '12px' }}>
-              Upozornění
-            </div>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <div style={{ display: 'flex', gap: '10px', background: '#1C1630', borderRadius: '12px', padding: '12px', alignItems: 'center' }}>
-                <Bell size={18} style={{ color: '#A78BFA' }} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#fff' }}>Reset žebříčku</div>
-                  <div style={{ fontFamily: 'Inter', fontSize: '10px', color: '#6B6B8A' }}>Reset proběhne za 2 dny. Pospěš si!</div>
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: '10px', background: '#1C1630', borderRadius: '12px', padding: '12px', alignItems: 'center' }}>
-                <Bell size={18} style={{ color: '#F5B73F' }} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#fff' }}>Nová sezónní výzva</div>
-                  <div style={{ fontFamily: 'Inter', fontSize: '10px', color: '#6B6B8A' }}>Zaya odemkla bonusový příběhový uzel.</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* MODAL 10: Notifications — real server notifications + preferences */}
+        {activeModal === 'notifications' && <NotificationsPanel />}
 
         {/* MODAL 11: Collections / Sbírky */}
         {activeModal === 'collections' && (() => {

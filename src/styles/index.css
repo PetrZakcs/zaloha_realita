@@ -106,3 +106,14 @@ button:hover { opacity: 0.9; }
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #382C5C; border-radius: 4px; }
+
+/* Game Bible · Art Bible "REDUCED MOTION" / "ACCESSIBILITY": with the OS setting on, animations
+   and transitions collapse to their end state — the meaning of each state stays visible. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

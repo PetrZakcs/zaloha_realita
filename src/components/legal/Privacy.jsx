@@ -16,7 +16,7 @@ export default function Privacy() {
           heading: '2. Jaké údaje zpracováváme',
           body: [
             'Účet: e-mail (u přihlášení přes Google/Discord), zobrazované jméno, Discord ID (pokud propojíš účet).',
-            'Herní data: XP, počet klíčů, dosažený uzel příběhu, odznaky, tvůj "slib", stav Hra Passu.',
+            'Herní data: XP, počet klíčů, dosažený uzel příběhu, odznaky, tvůj "slib", stav Founder Passu.',
             'Obsah, který nahraješ: fotky jako důkaz splnění výzvy a text příspěvku do Feedu — pokud je příspěvek veřejný, je viditelný ostatním uživatelům; nahrané fotky jsou technicky dostupné komukoliv, kdo zná jejich přímý odkaz.',
             'Technická/analytická data: anonymní identifikátor zařízení, čas a typ akcí v aplikaci (např. dokončení výzvy, spuštění přihlášení) — pro pochopení používání aplikace, ne pro cílenou reklamu.',
             'Platební údaje: čísla karet nezpracováváme ani neukládáme my — platby řeší Stripe jako samostatný správce.'
@@ -25,7 +25,7 @@ export default function Privacy() {
         {
           heading: '3. Proč údaje zpracováváme (právní základ)',
           body: [
-            'Plnění smlouvy — vedení herního účtu a poskytnutí obsahu, který sis objednal/-a (např. Hra Pass).',
+            'Plnění smlouvy — vedení herního účtu a poskytnutí obsahu, který sis objednal/-a (např. Founder Pass).',
             'Oprávněný zájem — základní analytika používání aplikace, prevence zneužití herních mechanik.',
             'Souhlas — kde je vyžadován (např. při propojení Discord účtu, marketingová komunikace, pokud existuje).'
           ]
@@ -34,7 +34,7 @@ export default function Privacy() {
           heading: '4. S kým údaje sdílíme',
           body: [
             'Supabase (databáze a autentizace, EU/US infrastruktura) — technický zpracovatel.',
-            'Stripe (platby) — pokud si aktivuješ Hra Pass.',
+            'Stripe (platby) — pokud si aktivuješ Founder Pass.',
             '[DOPLNIT: Airtable/Discord integrace — pokud propojíš Discord účet, informace o odemčených odměnách se synchronizují do externího Airtable přes vlastní backend integraci.]',
             'Údaje neprodáváme třetím stranám pro marketingové účely.'
           ]
@@ -48,7 +48,7 @@ export default function Privacy() {
         {
           heading: '6. Tvá práva',
           body: [
-            'Máš právo na přístup ke svým údajům, jejich opravu, výmaz, omezení zpracování, přenositelnost a právo vznést námitku. Žádost můžeš poslat na [DOPLNIT: kontaktní e-mail]. Smazání účtu si aktuálně můžeš v aplikaci vyžádat přes Nastavení → Resetovat pokrok (lokální data) nebo napsáním na kontaktní e-mail (úplný výmaz účtu v databázi).'
+            'Máš právo na přístup ke svým údajům, jejich opravu, výmaz, omezení zpracování, přenositelnost a právo vznést námitku. Žádost můžeš poslat na [DOPLNIT: kontaktní e-mail]. Účet včetně postupu, důkazů a fotek si smažeš sám/sama v aplikaci v Nastavení → Smazat účet.'
           ]
         },
         {

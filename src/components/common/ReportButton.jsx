@@ -4,17 +4,22 @@ import { useUserStore } from '../../store/userStore';
 
 // MVP1 spec-12 §8.3 "základní moderation (report button)". Three distinct reports hide the
 // post until an admin reviews it (report_post() in 20260925130000_mvp1_spec_debt.sql).
+// Game Bible · Feed "REPORT CATEGORIES" + "USER CONTROLS" (Skrýt / Zablokovat hráče).
 const REASONS = [
-  { key: 'inappropriate', label: 'Nevhodný obsah' },
   { key: 'spam', label: 'Spam' },
   { key: 'harassment', label: 'Obtěžování' },
+  { key: 'inappropriate', label: 'Sexuální / nevhodný obsah' },
   { key: 'dangerous', label: 'Nebezpečná aktivita' },
+  { key: 'misinformation', label: 'Dezinformace' },
   { key: 'privacy', label: 'Porušení soukromí' },
+  { key: 'hate', label: 'Nenávist' },
+  { key: 'self_harm', label: 'Obava o sebepoškození' },
+  { key: 'scam', label: 'Podvod' },
   { key: 'other', label: 'Jiné' },
 ];
 
 export default function ReportButton({ post }) {
-  const { user, reportPost } = useUserStore();
+  const { user, reportPost, hidePost, blockUser } = useUserStore();
   const [open, setOpen] = useState(false);
   const [state, setState] = useState('idle'); // idle | sending | done | error
 
@@ -36,8 +41,8 @@ export default function ReportButton({ post }) {
     <span style={{ position: 'relative', display: 'inline-flex' }}>
       <button
         type="button"
-        aria-label="Nahlásit příspěvek"
-        title="Nahlásit"
+        aria-label="Možnosti příspěvku"
+        title="Skrýt / zablokovat / nahlásit"
         disabled={state === 'sending'}
         onClick={(e) => { e.stopPropagation(); setOpen(o => !o); }}
         style={{ display: 'inline-flex', background: 'none', border: 'none', padding: 0, color: state === 'error' ? '#EF4444' : '#6B6B8A', cursor: 'pointer' }}
@@ -54,7 +59,18 @@ export default function ReportButton({ post }) {
             boxShadow: '0 8px 24px rgba(0,0,0,.5)'
           }}
         >
-          <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#9A9AB5', padding: '4px 8px 6px' }}>Proč to nahlašuješ?</div>
+          {[
+            { label: 'Skrýt příspěvek', run: () => hidePost(post.id) },
+            { label: `Zablokovat hráče ${post.user_name}`, run: () => blockUser(post.user_id) },
+          ].map(a => (
+            <button key={a.label} type="button" role="menuitem"
+              onClick={() => { setOpen(false); a.run(); }}
+              style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', color: '#F0F0F8', fontFamily: 'Inter', fontSize: '12px', padding: '7px 8px', borderRadius: '8px', cursor: 'pointer' }}>
+              {a.label}
+            </button>
+          ))}
+          <div style={{ height: '0.5px', background: '#382C5C', margin: '4px 0' }} />
+          <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#9A9AB5', padding: '4px 8px 6px' }}>Nahlásit — proč?</div>
           {REASONS.map(r => (
             <button
               key={r.key}

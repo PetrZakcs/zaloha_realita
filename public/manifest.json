@@ -2,6 +2,7 @@
   "id": "cz.iwau.hra-reality",
   "short_name": "Hra Reality",
   "name": "iWau — Hra Reality",
+  "lang": "cs",
   "description": "Real-world výzvy, příběh a odměny — přestaň sledovat svůj život, začni ho hrát.",
   "categories": ["lifestyle", "entertainment", "games"],
   "icons": [
@@ -19,7 +20,13 @@
       "src": "logo512.png",
       "type": "image/png",
       "sizes": "512x512",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "logo512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
     }
   ],
   "start_url": "/",
@@ -32,13 +39,15 @@
     {
       "name": "Aktivní výzva",
       "short_name": "Výzva",
-      "description": "Otevřít přímo dnešní reálnou výzvu",
+      "lang": "cs",
+  "description": "Otevřít přímo dnešní reálnou výzvu",
       "url": "/story"
     },
     {
       "name": "Feed komunity",
       "short_name": "Feed",
-      "description": "Zobrazit splněné výzvy komunity",
+      "lang": "cs",
+  "description": "Zobrazit splněné výzvy komunity",
       "url": "/feed"
     }
   ],

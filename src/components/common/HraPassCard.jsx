@@ -52,7 +52,7 @@ export default function HraPassCard({ compact = false }) {
             borderRadius: '6px',
             padding: '2px 8px'
           }}>
-            SEZÓNA 0 · VIP PASS
+            SEZÓNA 0 · FOUNDER PASS
           </span>
           {isPassHolder && (
             <span style={{
@@ -70,7 +70,7 @@ export default function HraPassCard({ compact = false }) {
           )}
         </div>
         <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', color: '#9A9AB5' }}>
-          9 Uzlů & ODZNAKY
+          BEZ ČEKÁNÍ
         </span>
       </div>
 
@@ -102,7 +102,7 @@ export default function HraPassCard({ compact = false }) {
               fontFamily: "'Space Grotesk', sans-serif",
               letterSpacing: '-0.01em'
             }}>
-              {isPassHolder ? 'HRA PASS Je Aktivní' : 'Aktivovat HRA PASS'}
+              {isPassHolder ? 'Founder Pass je aktivní' : 'Odemkni Founder Pass'}
             </div>
             <div style={{
               color: isPassHolder ? '#F5B73F' : '#B4B4CE',
@@ -112,8 +112,8 @@ export default function HraPassCard({ compact = false }) {
               fontFamily: 'Inter, sans-serif'
             }}>
               {isPassHolder
-                ? 'Máš odemčené všechny výzvy & odznaky'
-                : 'Získej přístup ke všem 9 Uzlům & kartě MVP-1'}
+                ? 'Celá sezóna bez čekání a zvýrazněné důkazy'
+                : 'Celá sezóna bez čekání, Founder identita, certifikát'}
             </div>
           </div>
         </div>
@@ -135,7 +135,7 @@ export default function HraPassCard({ compact = false }) {
             flexShrink: 0
           }}>
             <Sparkles size={14} />
-            <span>129 Kč</span>
+            <span>{user?.passLapsed ? 199 : 149} Kč</span>
             <ChevronRight size={14} />
           </div>
         ) : (

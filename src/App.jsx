@@ -1,7 +1,8 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { supabase } from './api/supabaseClient';
 import { track } from './lib/analytics';
+import { captureTouch } from './lib/attribution';
 import { useUserStore } from './store/userStore';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
@@ -11,10 +12,21 @@ import Leaderboard from './components/Leaderboard';
 import Profile from './components/Profile';
 import PublicProfile from './components/PublicProfile';
 import Inventory from './components/Inventory';
-import AdminContentManager from './components/admin/AdminContentManager';
-import Terms from './components/legal/Terms';
-import Privacy from './components/legal/Privacy';
+import PasswordRecoveryScreen from './components/onboarding/PasswordRecoveryScreen';
 import './styles/index.css';
+
+// Rarely opened, and no reason for every player to download the admin.
+const AdminContentManager = lazy(() => import('./components/admin/AdminContentManager'));
+const Terms = lazy(() => import('./components/legal/Terms'));
+const Privacy = lazy(() => import('./components/legal/Privacy'));
+
+// supabase-js removes the hash once it has processed it, so this is read at module load.
+const OPENED_FROM_RECOVERY_LINK = window.location.hash.includes('type=recovery');
+
+// Read once at module load too: child effects run first, and Layout's redirect into the feed
+// replaces the URL before App's effect would see ?ref= or ?payment=.
+let initialSearch = window.location.search;
+const INITIAL_PATH = window.location.pathname;
 
 const AdminRoute = () => {
   const { user } = useUserStore();
@@ -66,10 +78,11 @@ function App() {
     // (handleOAuthSession() in authSlice.js), which may be a different page load entirely.
     // Never overwrites an already-pending code — first link a device saw wins, so bouncing
     // through a second, unrelated referral link before signing up doesn't reassign credit.
-    const refCode = new URLSearchParams(window.location.search).get('ref');
-    if (refCode && !localStorage.getItem('pendingReferralCode')) {
-      localStorage.setItem('pendingReferralCode', refCode.toUpperCase());
-    }
+    // Now also keeps first/last touch (quest, share type) — src/lib/attribution.js.
+    const search = initialSearch;
+    initialSearch = '';
+    const touch = captureTouch(search, INITIAL_PATH);
+    if (touch) track('invite_landing_viewed', { share_type: touch.share_type || null, has_quest: !!touch.quest });
 
     // spec-11 monetization KPI: "% dokončí nákup" / "čas od vstupu do nákupu" — the actual
     // pass_holder flip happens server-side (stripe-webhook), invisible to the client, and
@@ -77,10 +90,16 @@ function App() {
     // (see stripe-checkout's successUrl in ModalManager.jsx) was previously the only signal
     // the client ever gets that a purchase happened — and nothing read it at all. Stripped
     // from the URL right after so a refresh doesn't re-fire it.
-    if (new URLSearchParams(window.location.search).get('payment') === 'success') {
-      track('pass_purchase_completed');
+    const paymentResult = new URLSearchParams(search).get('payment');
+    if (paymentResult) {
       window.history.replaceState({}, '', window.location.pathname);
     }
+    if (paymentResult === 'success') {
+      track('pass_purchase_completed');
+      useUserStore.getState().awaitPassActivation();
+    }
+
+    if (OPENED_FROM_RECOVERY_LINK) useUserStore.getState().setPasswordRecovery(true);
 
     // Check initial active session
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -88,12 +107,15 @@ function App() {
         localStorage.setItem('userId', session.user.id);
         useUserStore.getState().handleOAuthSession(session);
       } else {
-        // No active session — mark checked so the loading screen clears and
-        // the splash / login UI can be shown.
+        // No active session — mark checked so the loading screen clears and the landing can
+        // be shown. A locally remembered player whose session is gone (expired, signed out
+        // elsewhere) goes back to the landing too instead of a UI where every write fails.
+        if (useUserStore.getState().onboarded) useUserStore.getState().clearLocalSession();
         useUserStore.getState().setSessionChecked(true);
         useUserStore.getState().fetchFeedPosts();
         useUserStore.getState().fetchLeaderboard();
       }
+      useUserStore.getState().fetchGameConfig();
       // Real player count for social-proof copy (e.g. onboarding) — needed
       // pre-login too, so fetched unconditionally rather than in the branches above.
       useUserStore.getState().fetchPlayerCount();
@@ -116,10 +138,11 @@ function App() {
     //     also fires only after the client has fully processed the hash token.
     //   • Email confirm link: same fresh-page-load path via getSession().
     //
-    // Subscription kept alive for future cross-tab SIGNED_OUT sync.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, _session) => {
-      // No-op for now — all auth transitions handled at call sites above.
-      void event;
+    // The only transitions handled here are the ones no call site can see: a session ending on
+    // its own / in another tab, and the password recovery link.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT' && useUserStore.getState().user) useUserStore.getState().clearLocalSession();
+      if (event === 'PASSWORD_RECOVERY') useUserStore.getState().setPasswordRecovery(true);
     });
 
     track('app_opened', { date: new Date().toISOString().slice(0, 10) });
@@ -129,6 +152,8 @@ function App() {
 
   return (
     <BrowserRouter>
+      <PasswordRecoveryScreen />
+      <Suspense fallback={<div style={{ background: '#0D0A18', height: '100vh' }} />}>
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
@@ -143,6 +168,7 @@ function App() {
         <Route path="/terms" element={<Terms />} />
         <Route path="/privacy" element={<Privacy />} />
       </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

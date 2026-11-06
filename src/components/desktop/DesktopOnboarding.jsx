@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useUserStore } from '../../store/userStore';
-import { track } from '../../lib/analytics';
 import { getAvatarLevel } from '../../lib/avatarLevels';
-import { ALL_CARDS, findCard } from '../../lib/cards';
 import { DESKTOP_ONBOARDING_STEPS } from '../../store/slices/authSlice';
-import { Sparkles, MonitorDown, Check, Radio, Gift, Crown, ArrowDown, ArrowUp } from 'lucide-react';
+import { MonitorDown, Check } from 'lucide-react';
 import EmailAuthForm from '../onboarding/EmailAuthForm';
 import { GoogleIcon, DiscordIcon } from '../onboarding/AuthIcons';
 import { EXTRA_OAUTH_PROVIDERS } from '../../lib/authProviders';
+import { LandingStep, FirstRewardStep, FirstDropStep, IdentityStep, TransitionStep } from '../onboarding/OnboardingExtraSteps';
 import { usePwaInstall } from '../../hooks/usePwaInstall';
 
 const RADIUS = 16;
@@ -98,50 +97,34 @@ function BrandPanel({ playerCount }) {
   );
 }
 
-// MVP1 spec-3 flow: entry (binary choice, no session) -> first-reward (local-only XP
-// preview, no session) -> login (the only step touching Supabase Auth) -> avatar-upgrade
-// (post-login beat) -> mystery-box (reveals the starter card) -> slib (pledge, published as
-// the first real proof) -> reward2 (celebration + optional Hra Pass upsell) -> install
-// (desktop-only PWA step) -> Dashboard. See DESKTOP_ONBOARDING_STEPS in authSlice.js for the
-// authoritative step list/rationale.
+// Spec-14 flow, see DESKTOP_ONBOARDING_STEPS in authSlice.js for the step list and rationale.
 export default function DesktopOnboarding() {
   const {
     user,
     onboardingStep,
     nextOnboardingStep,
-    completeOnboarding,
     submitPledge,
     login,
-    openModal,
     playerCount
   } = useUserStore();
 
   const [tempPledge, setTempPledge] = useState('');
   const [pledgeError, setPledgeError] = useState('');
   const [pendingProvider, setPendingProvider] = useState(null);
-  const [boxOpened, setBoxOpened] = useState(false);
   const { isInstallable, isInstalled, promptInstall } = usePwaInstall();
 
-  // Any step value not part of the desktop sequence (e.g. a legacy value
-  // from before this rework) falls through to entry, consistent with
-  // nextOnboardingStep's own fallback.
-  const step = DESKTOP_ONBOARDING_STEPS.includes(onboardingStep) ? onboardingStep : 'entry';
+  // A step value outside the desktop sequence (e.g. a mobile-only one) falls back to the start.
+  const step = DESKTOP_ONBOARDING_STEPS.includes(onboardingStep) ? onboardingStep : 'landing';
 
-  // first-reward and avatar-upgrade are short auto-advancing beats (see MobileOnboarding.jsx
-  // for the same rationale) — mystery-box and slib wait for a real tap/input instead.
+  // avatar-upgrade is a short auto-advancing beat (spec timing 700–1000 ms).
   useEffect(() => {
-    if (step !== 'first-reward' && step !== 'avatar-upgrade') return;
-    const t = setTimeout(() => nextOnboardingStep(false), step === 'first-reward' ? 1800 : 1400);
+    if (step !== 'avatar-upgrade') return undefined;
+    const t = setTimeout(() => nextOnboardingStep(false), 1000);
     return () => clearTimeout(t);
   }, [step, nextOnboardingStep]);
 
-  const handleEntryChoice = (choice) => {
-    track('entry_choice', { choice });
-    nextOnboardingStep(false);
-  };
-
   const handlePledgeSubmit = () => {
-    if (!tempPledge.trim()) { setPledgeError('Napiš svůj slib — ať máš co sdílet.'); return; }
+    if (!tempPledge.trim()) { setPledgeError('Napiš jednu větu — nebo tenhle krok přeskoč.'); return; }
     submitPledge(tempPledge.trim());
     nextOnboardingStep(false);
   };
@@ -185,58 +168,26 @@ export default function DesktopOnboarding() {
 
   const level0 = getAvatarLevel(0);
   const level1 = getAvatarLevel(1);
-  const starterCard = findCard('doer-mvp1');
 
   let rightPanel;
 
-  if (step === 'entry') {
+  if (step === 'landing') {
     rightPanel = (
       <Card>
-        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '24px', color: '#F0F0F8' }}>Tohle není hra.</div>
-        <div style={{ fontFamily: 'Inter', fontSize: '14px', color: '#6B6B8A', marginTop: '8px' }}>Vyber instinktivně.</div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '24px' }}>
-          <button onClick={() => handleEntryChoice('stagnuju')} style={{ ...oauthButtonStyle(false), height: '58px' }}>
-            <ArrowDown size={16} color="#EF4444" /> Mám pocit, že stagnuju
-          </button>
-          <button onClick={() => handleEntryChoice('posouvam')} style={{ ...oauthButtonStyle(false), height: '58px' }}>
-            <ArrowUp size={16} color="#22C55E" /> Mám pocit, že se posouvám
-          </button>
-        </div>
+        <LandingStep onEnter={() => nextOnboardingStep(false)} />
       </Card>
     );
   } else if (step === 'first-reward') {
     rightPanel = (
       <Card>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-          <div style={{
-            width: '104px', height: '104px', borderRadius: '50%', background: 'linear-gradient(150deg,#241a3d,#1C1630)',
-            border: '1.5px solid #A78BFA', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 0 28px rgba(167,139,250,.45)', animation: 'ringPulse 1.6s ease-out infinite'
-          }}>
-            <Radio size={46} color="#A78BFA" />
-          </div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', letterSpacing: '.12em', color: '#A78BFA', textTransform: 'uppercase', marginTop: '18px' }}>
-            Signál zachycen
-          </div>
-          <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', marginTop: '8px' }}>98 % lidí tohle ignoruje. Ty ne.</div>
-          <div style={{
-            fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '52px', color: '#4AA8FF',
-            textShadow: '0 0 20px rgba(74,168,255,.7), 0 0 40px rgba(59,130,246,.4)', marginTop: '6px'
-          }}>
-            +50 XP
-          </div>
-          <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '13px', color: '#F0F0F8', marginTop: '8px' }}>
-            Status: Pozorovatel · Level 1
-          </div>
-        </div>
+        <FirstRewardStep onNext={() => nextOnboardingStep(false)} />
       </Card>
     );
   } else if (step === 'login') {
     rightPanel = (
       <Card>
-        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '24px', color: '#F0F0F8' }}>Ulož svůj postup</div>
-        <div style={{ fontFamily: 'Inter', fontSize: '14px', color: '#6B6B8A', marginTop: '8px' }}>Pokud teď odejdeš, tenhle moment se neuloží.</div>
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '24px', color: '#F0F0F8' }}>Vstup do hry</div>
+        <div style={{ fontFamily: 'Inter', fontSize: '14px', color: '#6B6B8A', marginTop: '8px' }}>Tvůj postup se ukládá od první akce.</div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '24px' }}>
           <button onClick={() => handleOAuthClick('google')} disabled={pendingProvider === 'google'} style={oauthButtonStyle(pendingProvider === 'google')}>
@@ -260,13 +211,21 @@ export default function DesktopOnboarding() {
 
         <EmailAuthForm radius={RADIUS} />
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '20px', padding: '12px 14px', background: '#241C3C', border: '0.5px solid #382C5C', borderRadius: '10px' }}>
-          <Sparkles size={18} color="#F5B73F" />
-          <span style={{ fontFamily: 'Inter', fontSize: '13px', color: '#F0F0F8', fontWeight: '500' }}>Po registraci okamžitě získáš <span style={{ color: '#F5B73F', fontWeight: '600' }}>+1 klíč</span></span>
-        </div>
         <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', textAlign: 'center', marginTop: '16px', lineHeight: '1.55' }}>
           Pokračováním souhlasíš s <a href="/terms" style={{ color: '#9A9AB5' }}>podmínkami</a> a <a href="/privacy" style={{ color: '#9A9AB5' }}>zpracováním údajů</a>.
         </div>
+      </Card>
+    );
+  } else if (step === 'identity') {
+    rightPanel = (
+      <Card>
+        <IdentityStep onNext={() => nextOnboardingStep(false)} />
+      </Card>
+    );
+  } else if (step === 'transition') {
+    rightPanel = (
+      <Card>
+        <TransitionStep />
       </Card>
     );
   } else if (step === 'avatar-upgrade') {
@@ -303,50 +262,23 @@ export default function DesktopOnboarding() {
   } else if (step === 'mystery-box') {
     rightPanel = (
       <Card>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-          {!boxOpened ? (
-            <div onClick={() => setBoxOpened(true)} style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-              <div style={{
-                width: '120px', height: '120px', borderRadius: '22px', background: 'linear-gradient(150deg,#241a3d,#1C1630)',
-                border: '1.5px dashed #A78BFA', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: '0 0 24px rgba(167,139,250,.35)'
-              }}>
-                <Gift size={48} color="#A78BFA" />
-              </div>
-              <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '14px', color: '#F0F0F8' }}>Klikni a otevři svůj první drop</div>
-            </div>
-          ) : (
-            <>
-              <div style={{
-                width: '120px', height: '120px', borderRadius: '22px', background: starterCard?.bg || '#241a3d',
-                border: `2px solid ${starterCard?.border || '#7C3AED'}`, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: `0 0 28px ${starterCard?.border || '#7C3AED'}55`
-              }}>
-                <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '16px', color: starterCard?.color || '#A78BFA' }}>{starterCard?.title || 'Doer'}</span>
-              </div>
-              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', letterSpacing: '.1em', color: '#A78BFA', textTransform: 'uppercase', marginTop: '18px' }}>
-                Získal/a jsi kartu
-              </div>
-              <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', marginTop: '6px' }}>1 / {ALL_CARDS.length} ve tvém Inventáři</div>
-              <button onClick={() => nextOnboardingStep(false)} style={{ ...primaryButtonStyle, marginTop: '22px' }}>Pokračovat</button>
-            </>
-          )}
-        </div>
+        <FirstDropStep onNext={() => nextOnboardingStep(false)} />
       </Card>
     );
   } else if (step === 'slib') {
-    // Personal commitment the app can later refer back to — and also the
-    // player's first real proof: submitPledge() saves it AND publishes it
-    // as a real feed_posts row (see authSlice.js).
+    // Onboarding proof (spec-14 §4): one sentence, published with its own look in the feed,
+    // +1 key. Skippable, but then no key.
     rightPanel = (
       <Card>
-        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '24px', color: '#F0F0F8' }}>Tvůj slib</div>
-        <div style={{ fontFamily: 'Inter', fontSize: '14px', color: '#6B6B8A', marginTop: '8px' }}>Zavaž se k akci, ne jen k teorii — Zaya se k tomuhle slibu ještě vrátí.</div>
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '24px', color: '#F0F0F8' }}>Tvůj první důkaz</div>
+        <div style={{ fontFamily: 'Inter', fontSize: '14px', color: '#6B6B8A', marginTop: '8px' }}>Jedna věta. Uvidí ji ostatní hráči ve feedu a dostaneš za ni první klíč.</div>
         <textarea
           value={tempPledge}
           onChange={(e) => { setTempPledge(e.target.value); if (pledgeError) setPledgeError(''); }}
           placeholder="Jsem člověk, co…"
-          rows={4}
+          rows={3}
+          maxLength={280}
+          aria-label="Tvůj první důkaz"
           style={{
             width: '100%', background: '#2A2142', border: `1px solid ${pledgeError ? '#EF4444' : '#7C3AED'}`, borderRadius: `${RADIUS}px`, color: '#F0F0F8',
             padding: '14px 16px', fontSize: '14px', outline: 'none', resize: 'none', lineHeight: '1.5', boxSizing: 'border-box', marginTop: '20px'
@@ -359,46 +291,11 @@ export default function DesktopOnboarding() {
           onClick={handlePledgeSubmit}
           style={{ ...primaryButtonStyle, marginTop: '20px' }}
         >
-          Zveřejnit a pokračovat
+          Zveřejnit · +1 klíč
         </button>
-      </Card>
-    );
-  } else if (step === 'reward2') {
-    rightPanel = (
-      <Card>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-          <Sparkles size={48} color="#A78BFA" />
-          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '26px', color: '#F0F0F8', marginTop: '18px' }}>Vítej v Hře Reality!</div>
-          <div style={{ fontFamily: 'Inter', fontSize: '14px', color: '#9A9AB5', marginTop: '10px' }}>
-            Máš prvních 10 XP a klíč od Uzlu 1. Tvá první výzva čeká na nástěnce.
-          </div>
-
-          <div style={{
-            width: '100%', background: '#241C3C', border: '1px dashed #F5B73F', borderRadius: '16px',
-            padding: '14px', display: 'flex', flexDirection: 'column', gap: '8px', textAlign: 'left', marginTop: '20px'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Crown size={16} color="#F5B73F" />
-              <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '13px', color: '#F0F0F8' }}>Volitelné: Hra Pass</span>
-            </div>
-            <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#9A9AB5', lineHeight: '1.5' }}>
-              Prémiové výzvy, exkluzivní odznaky a celý příběh se Zayou — 149 Kč / měsíc.
-            </div>
-            <button
-              onClick={() => { completeOnboarding(); openModal('paywall'); }}
-              style={{
-                alignSelf: 'flex-start', background: 'transparent', border: 'none', color: '#F5B73F',
-                fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', cursor: 'pointer', padding: 0, marginTop: '2px'
-              }}
-            >
-              Zjistit více →
-            </button>
-          </div>
-
-          <button onClick={() => nextOnboardingStep(false)} style={{ ...primaryButtonStyle, marginTop: '20px' }}>
-            Pokračovat
-          </button>
-        </div>
+        <button type="button" onClick={() => nextOnboardingStep(false)} style={{ width: '100%', background: 'none', border: 'none', color: '#6B6B8A', fontFamily: 'Inter', fontSize: '13px', cursor: 'pointer', marginTop: '8px' }}>
+          Přeskočit tento krok (bez klíče)
+        </button>
       </Card>
     );
   } else if (step === 'install') {
@@ -434,14 +331,14 @@ export default function DesktopOnboarding() {
             </div>
           )}
           <button
-            onClick={async () => { if (isInstallable) await promptInstall(); completeOnboarding(); }}
+            onClick={async () => { if (isInstallable) await promptInstall(); nextOnboardingStep(false); }}
             style={{ ...primaryButtonStyle, marginTop: '24px' }}
           >
             {isInstalled ? 'Otevřít hlavní panel' : 'Nainstalovat'}
           </button>
           {!isInstalled && (
             <button
-              onClick={() => completeOnboarding()}
+              onClick={() => nextOnboardingStep(false)}
               style={{ width: '100%', height: '44px', background: 'transparent', border: 'none', color: '#6B6B8A', fontFamily: 'Inter', fontWeight: '500', fontSize: '13px', cursor: 'pointer', marginTop: '6px' }}
             >
               Teď ne, pokračovat

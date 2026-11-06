@@ -3,12 +3,19 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
+import ErrorBoundary from './components/common/ErrorBoundary';
+import { reportClientError } from './lib/analytics';
 import * as serviceWorkerRegistration from './serviceWorkerRegistration';
+
+window.addEventListener('error', (event) => reportClientError(event.error || event.message, { source: 'window' }));
+window.addEventListener('unhandledrejection', (event) => reportClientError(event.reason, { source: 'promise' }));
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>
 );
 

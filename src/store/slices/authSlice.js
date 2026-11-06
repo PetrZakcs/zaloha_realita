@@ -1,34 +1,27 @@
 import { supabase } from '../../api/supabaseClient';
 import { track } from '../../lib/analytics';
+import { getTouches } from '../../lib/attribution';
+import { compressImage } from '../../lib/compressImage';
+import { unsubscribeFromPush } from '../../lib/push';
 
-// Ordered onboarding step sequences per platform — MVP1 spec-3 "CELÝ FLOW: LANDING ->
-// QUEST LOOP". The whole point of this sequence is that login comes AFTER a first taste of
-// the game, not before it:
-//   01 entry (hero + instinctive binary choice, no session yet) ->
-//   02 first-reward (local-only "SIGNÁL ZACHYCEN" +XP preview, no session yet, nothing
-//      persisted — there's no account to persist it to) ->
-//   03 login (Google/Discord/email auth, reframed as "save this moment" rather than a
-//      gate — this is the ONLY step that touches Supabase Auth) ->
-//   04 avatar-upgrade (short post-login beat, avatar visibly changes from Level 0 "NPC" to
-//      Level 1 "Pozorovatel" styling — see src/lib/avatarLevels.js) ->
-//   05 mystery-box (reveals the always-unlocked 'doer-mvp1' starter card, see src/lib/cards.js) ->
-//   06 slib (personal pledge, published as the player's first real proof — kept from the
-//      previous flow: MVP1 PRD §2.5/§6.2 wants this as onboarding's sub-60s micro-activation) ->
-//   07 reward2 (full celebration + optional Hra Pass upsell -> Dashboard).
-// Desktop gets an extra 'install' (PWA) step at the end, right before completeOnboarding()
-// flips `onboarded`; mobile keeps its existing separate post-onboarding install banner
-// instead (see PwaInstallBanner.jsx) and never uses 'install'.
-//
-// Deliberately no separate nickname-picking step — spec-3's login step is explicit that the
-// username is "auto generated (Pozorovatel_763), poté může později změnit ve svém profilu".
-// The player's one free rename (changeDisplayNameOnce(), see
-// supabase_migration_profile_showcase.sql) is now genuinely unused until they deliberately
-// visit Settings, instead of being silently spent by a mandatory onboarding field. The old
-// setNickname()/set_initial_nickname() RPC pair that used to back a nickname step has been
-// removed entirely (see supabase_migration_consolidated_functions.sql) rather than left
-// unused, per a since-confirmed cleanup pass.
-export const MOBILE_ONBOARDING_STEPS = ['entry', 'first-reward', 'login', 'avatar-upgrade', 'mystery-box', 'slib', 'reward2'];
-export const DESKTOP_ONBOARDING_STEPS = ['entry', 'first-reward', 'login', 'avatar-upgrade', 'mystery-box', 'slib', 'reward2', 'install'];
+// Ordered onboarding step sequences per platform — spec-14 (the newer flow, login first):
+//   landing (hero + CTA, no session) -> login (the only step touching Supabase Auth) ->
+//   identity (optional nickname + photo; skipping keeps the auto-generated name, and from here
+//   the whole onboarding can be skipped → NPC state) -> first-reward (+50 XP, granted by the
+//   server, first share moment) -> slib (onboarding proof, published to the feed with its own
+//   look, +1 key; skippable, then no key) -> avatar-upgrade (Stav 0 → Stav 1) -> mystery-box
+//   (first drop, second share moment) -> transition ("Další úroveň je připravena", then straight
+//   into the first story node).
+// Desktop gets an extra 'install' (PWA) step right before the transition; mobile keeps its
+// separate post-onboarding install banner instead (see PwaInstallBanner.jsx).
+export const MOBILE_ONBOARDING_STEPS = ['landing', 'login', 'identity', 'first-reward', 'slib', 'avatar-upgrade', 'mystery-box', 'transition'];
+export const DESKTOP_ONBOARDING_STEPS = ['landing', 'login', 'identity', 'first-reward', 'slib', 'avatar-upgrade', 'mystery-box', 'install', 'transition'];
+
+// Steps a signed-in player can be in the middle of. A reload here must resume the flow instead
+// of dropping them into the game with half the rewards missing.
+const POST_LOGIN_STEPS = ['identity', 'first-reward', 'slib', 'avatar-upgrade', 'mystery-box', 'install', 'transition'];
+
+const LOCAL_SESSION_KEYS = ['user', 'userId', 'onboarded', 'onboardingStep', 'proofsSubmittedCount', 'glitchMomentShown'];
 
 // Discord's real user id (a "snowflake") is what airtable-sync needs as the join key for
 // the Airtable rewards sync. It's resolved server-side by the sync_discord_identity() RPC
@@ -96,7 +89,9 @@ export const createAuthSlice = (set, get) => {
   } catch (e) {
     console.error('Failed parsing local user data', e);
   }
-  const localOnboardingStep = localStorage.getItem('onboardingStep') || 'entry';
+  // Values from before the login-first rework ('entry', 'reward2', …) restart at the landing.
+  const storedStep = localStorage.getItem('onboardingStep');
+  const localOnboardingStep = DESKTOP_ONBOARDING_STEPS.includes(storedStep) ? storedStep : 'landing';
 
   return {
     onboarded: localOnboarded,
@@ -121,6 +116,9 @@ export const createAuthSlice = (set, get) => {
     setOnboardingStep: (step) => {
       set({ onboardingStep: step });
       localStorage.setItem('onboardingStep', step);
+      // spec-14 "Všechna data z onboardingu zaznamenávat" — every step view, so drop-off
+      // per step is measurable.
+      track('onboarding_step_viewed', { step });
     },
 
     setSessionChecked: (checked) => set({ sessionChecked: checked }),
@@ -281,8 +279,8 @@ export const createAuthSlice = (set, get) => {
 
         const needsConfirmation = !data.session;
         if (!needsConfirmation) {
-          set({ user: newUser, onboardingStep: 'avatar-upgrade' });
-          localStorage.setItem('onboardingStep', 'avatar-upgrade');
+          set({ user: newUser, onboardingStep: 'identity' });
+          localStorage.setItem('onboardingStep', 'identity');
           get().loadCurrentNodeData();
           // Drive the actual profiles-row creation directly too, same reason
           // as loginWithEmail — don't leave it solely to the async listener.
@@ -326,15 +324,14 @@ export const createAuthSlice = (set, get) => {
           localStorage.setItem('userId', data.session.user.id);
           await get().handleOAuthSession(data.session);
 
-          // handleOAuthSession succeeded IFF it set onboarded: true.
-          // If it didn't (e.g. profile missing in DB, INSERT policy not set,
-          // or any other silent failure), give the user a visible error
-          // instead of leaving them stuck on splash with no feedback.
-          if (!get().onboarded) {
-            console.error('[Auth] loginWithEmail: handleOAuthSession completed but onboarded is still false. Check [Auth] logs above for the root cause.');
+          // handleOAuthSession succeeded IFF the player is in the game or resuming onboarding.
+          // Otherwise (e.g. profile missing in DB, INSERT policy not set, any other silent
+          // failure) give the user a visible error instead of leaving them stuck.
+          if (!get().onboarded && !POST_LOGIN_STEPS.includes(get().onboardingStep)) {
+            console.error('[Auth] loginWithEmail: no profile after handleOAuthSession.');
             return {
               success: false,
-              error: 'Profil se nepodařilo načíst. Zkontroluj konzoli (DevTools → Console) pro detaily nebo kontaktuj podporu.'
+              error: 'Profil se nepodařilo načíst. Zkus to prosím znovu za chvíli.'
             };
           }
         }
@@ -415,24 +412,177 @@ export const createAuthSlice = (set, get) => {
       }
     },
 
-    completeOnboarding: () => {
-      const u = get().user || { ...DEFAULT_USER };
-      const updated = { ...u, xp: 10, keys_count: u.keys_count + 1 };
+    // Rewards (+50 XP, avatar Stav 1) are granted by the server (complete_onboarding) —
+    // the client used to write xp/keys itself, which the profile guard silently ignored.
+    // Grants the onboarding rewards (idempotent) without leaving the onboarding flow — called
+    // when the reward screen shows, so it displays real numbers and the share reward can be
+    // claimed right there.
+    grantOnboardingRewards: async () => {
+      try {
+        const { data, error } = await supabase.rpc('complete_onboarding');
+        if (error) throw error;
+        const row = Array.isArray(data) ? data[0] : data;
+        const u = get().user || { ...DEFAULT_USER };
+        const updated = row
+          ? { ...u, onboardingCompleted: true, xp: row.new_xp, keys_count: row.new_keys_balance, badges_count: row.new_avatar_level }
+          : { ...u, onboardingCompleted: true };
+        set({ user: updated });
+        localStorage.setItem('user', JSON.stringify(updated));
+        return true;
+      } catch (e) {
+        console.warn('complete_onboarding failed.', e);
+        return false;
+      }
+    },
+
+    completeOnboarding: async () => {
+      await get().grantOnboardingRewards();
+      const updated = { ...(get().user || { ...DEFAULT_USER }), onboardingCompleted: true };
       set({ user: updated, onboarded: true, onboardingStep: 'done' });
       localStorage.setItem('user', JSON.stringify(updated));
       localStorage.setItem('onboarded', 'true');
       localStorage.removeItem('onboardingStep');
-      get().updateUser({ xp: 10, keys_count: u.keys_count + 1 });
       get().loadCurrentNodeData();
       get().loadUnlockedCards();
+      get().fetchMysteryBoxes();
       track('onboarding_completed');
     },
 
-    logout: async () => {
-      localStorage.removeItem('user');
-      localStorage.removeItem('onboarded');
+    // spec-14 "Onboarding lze přeskočit" — the player lands in the game as an NPC (grey
+    // avatar, auto name, no onboarding XP/keys) and is nudged to finish activation later.
+    skipOnboarding: async (step) => {
+      track('onboarding_skipped', { step });
+      try {
+        const { error } = await supabase.rpc('skip_onboarding');
+        if (error) throw error;
+      } catch (e) {
+        console.warn('skip_onboarding failed.', e);
+      }
+      const u = get().user || { ...DEFAULT_USER };
+      const updated = { ...u, onboardingCompleted: false };
+      set({ user: updated, onboarded: true, onboardingStep: 'done' });
+      localStorage.setItem('user', JSON.stringify(updated));
+      localStorage.setItem('onboarded', 'true');
       localStorage.removeItem('onboardingStep');
-      set({ user: null, onboarded: false, onboardingStep: 'entry', activeModal: null, activeStoryNode: null, activeStoryNodeSteps: [] });
+      get().loadCurrentNodeData();
+      get().loadUnlockedCards();
+    },
+
+    // spec-14 "Kdo jsi jako hráč?" — one nickname during onboarding, not counted as the
+    // one free rename. Returns { success } or { error } (Czech copy).
+    setInitialNickname: async (name) => {
+      const { data, error } = await supabase.rpc('set_initial_nickname', { p_name: name });
+      if (error) {
+        if (error.code === '23505') return { error: 'Tahle přezdívka už je obsazená.' };
+        if (error.code === '22023') return { error: 'Přezdívka musí mít 3–20 znaků (písmena, čísla, mezera, _ nebo -).' };
+        return { error: 'Přezdívku se nepodařilo uložit.' };
+      }
+      const updated = { ...(get().user || DEFAULT_USER), name: data };
+      set({ user: updated });
+      localStorage.setItem('user', JSON.stringify(updated));
+      track('onboarding_nickname_set');
+      return { success: true };
+    },
+
+    // spec-14 "Vložit foto". Uploaded to avatars/<uid>/…, then linked via set_avatar_url().
+    uploadAvatar: async (rawFile) => {
+      if (!rawFile) return { error: 'Vyber fotku.' };
+      // Avatars never need more than 512 px — shrinking first also lets bigger photos through.
+      let file;
+      try {
+        file = await compressImage(rawFile, { maxSide: 512 });
+      } catch (e) {
+        return { error: 'Tenhle formát fotky neumíme zpracovat. Použij JPG nebo PNG.' };
+      }
+      if (file.size > 2 * 1024 * 1024) return { error: 'Fotka může mít maximálně 2 MB.' };
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return { error: 'Nejdřív se přihlas.' };
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `${session.user.id}/${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from('avatars').upload(path, file);
+      if (uploadError) return { error: 'Fotku se nepodařilo nahrát (JPG, PNG, WebP nebo HEIC do 2 MB).' };
+      const url = supabase.storage.from('avatars').getPublicUrl(path).data?.publicUrl || null;
+      const { error } = await supabase.rpc('set_avatar_url', { p_url: url });
+      if (error) return { error: 'Fotku se nepodařilo uložit.' };
+      const updated = { ...(get().user || DEFAULT_USER), avatarUrl: url };
+      set({ user: updated });
+      localStorage.setItem('user', JSON.stringify(updated));
+      track('avatar_photo_uploaded');
+      return { success: true };
+    },
+
+    removeAvatar: async () => {
+      const { error } = await supabase.rpc('set_avatar_url', { p_url: null });
+      if (error) return { error: 'Nepodařilo se odebrat fotku.' };
+      const updated = { ...(get().user || DEFAULT_USER), avatarUrl: null };
+      set({ user: updated });
+      localStorage.setItem('user', JSON.stringify(updated));
+      return { success: true };
+    },
+
+    // spec-12 §2.4 "3–5 odemykatelných rámečků" — unlock rules are enforced by set_active_frame().
+    setActiveFrame: async (frameKey) => {
+      const { error } = await supabase.rpc('set_active_frame', { p_frame: frameKey });
+      if (error) return { error: 'Tenhle rámeček ještě nemáš odemčený.' };
+      const updated = { ...(get().user || DEFAULT_USER), activeFrame: frameKey };
+      set({ user: updated });
+      localStorage.setItem('user', JSON.stringify(updated));
+      track('frame_equipped', { frame: frameKey });
+      return { success: true };
+    },
+
+    // Earned node badges (spec-15) + glitch code fragments (spec-12 §9) for Profil/Inventář.
+    badges: [],
+    badgeCatalog: [],
+    fragments: [],
+    loadIdentityExtras: async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+        const [{ data: owned }, { data: catalog }, { data: fragments }] = await Promise.all([
+          supabase.from('user_badges').select('badge_key, earned_at').eq('user_id', session.user.id),
+          supabase.from('node_rewards').select('*').order('node_order'),
+          supabase.from('player_fragments').select('fragment_no, code, earned_at').eq('user_id', session.user.id).order('fragment_no')
+        ]);
+        set({ badges: owned || [], badgeCatalog: catalog || [], fragments: fragments || [] });
+      } catch (e) {
+        console.warn('Failed to load badges/fragments.', e);
+      }
+    },
+
+    // spec-15 "za sdílení +1 klíč navíc (hráč musí vědět)" / spec-17 §14 "+1 key +5 XP".
+    // Once per share moment (server-enforced). Returns true when the reward was granted now.
+    claimShareReward: async (sourceType, sourceId) => {
+      try {
+        const { data, error } = await supabase.rpc('claim_share_reward', { p_source_type: sourceType, p_source_id: sourceId });
+        if (error) throw error;
+        if (data === true) {
+          const u = get().user || DEFAULT_USER;
+          const updated = { ...u, keys_count: (u.keys_count || 0) + 1, xp: (u.xp || 0) + 5 };
+          set({ user: updated });
+          localStorage.setItem('user', JSON.stringify(updated));
+          track('share_reward_granted', { source_type: sourceType });
+          get().fetchMysteryBoxes();
+        }
+        return data === true;
+      } catch (e) {
+        console.warn('claim_share_reward failed.', e);
+        return false;
+      }
+    },
+
+    // Forgets the signed-in player on this device. Also used when the session ends on its own
+    // (expired token, sign-out in another tab) — without this the app kept showing a player
+    // whose every write then failed.
+    clearLocalSession: () => {
+      LOCAL_SESSION_KEYS.forEach(key => localStorage.removeItem(key));
+      set({ user: null, onboarded: false, onboardingStep: 'landing', activeModal: null, activeStoryNode: null, activeStoryNodeSteps: [], sessionChecked: true });
+    },
+
+    logout: async () => {
+      // This device must stop getting the player's notifications (the next player may use it).
+      await unsubscribeFromPush();
+      get().clearLocalSession();
       try {
         await supabase.auth.signOut();
       } catch (e) {
@@ -440,10 +590,62 @@ export const createAuthSlice = (set, get) => {
       }
     },
 
+    requestPasswordReset: async (email) => {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+      track('password_reset_requested');
+      // Same answer whether the account exists or not, so this can't be used to probe e-mails.
+      if (error && /rate limit/i.test(error.message || '')) return { error: 'Příliš mnoho pokusů. Zkus to prosím za chvíli.' };
+      return { success: true };
+    },
+
+    passwordRecovery: false,
+    setPasswordRecovery: (value) => set({ passwordRecovery: value }),
+
+    setNewPassword: async (password) => {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) {
+        console.warn('Password update failed.', error);
+        return { error: /different from the old/i.test(error.message || '') ? 'Nové heslo musí být jiné než to staré.' : 'Heslo se nepodařilo změnit. Otevři odkaz z e-mailu znovu.' };
+      }
+      track('password_reset_completed');
+      set({ passwordRecovery: false });
+      return { success: true };
+    },
+
+    // GDPR: removes the player's files first (only the client can list them under RLS), then the
+    // account. A live subscription blocks it server-side, Stripe would keep charging otherwise.
+    deleteAccount: async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return { error: 'Nejsi přihlášen/a.' };
+      const uid = session.user.id;
+      for (const bucket of ['proofs', 'proofs-private', 'avatars']) {
+        const { data: files } = await supabase.storage.from(bucket).list(uid, { limit: 1000 });
+        if (files?.length) await supabase.storage.from(bucket).remove(files.map(f => `${uid}/${f.name}`));
+      }
+      const { error } = await supabase.rpc('delete_my_account');
+      if (error) {
+        console.warn('delete_my_account failed.', error);
+        return { error: /active_subscription/.test(error.message || '') ? 'Nejdřív zruš předplatné v Nastavení. Pak můžeš účet smazat.' : 'Účet se nepodařilo smazat. Zkus to prosím znovu.' };
+      }
+      await unsubscribeFromPush();
+      get().clearLocalSession();
+      await supabase.auth.signOut().catch(() => {});
+      return { success: true };
+    },
+
+
     fetchUser: async (userId) => {
       try {
         const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
         if (data) {
+          // Identity state that only RPCs write (onboarding status, photo, frame).
+          const { data: psData } = await supabase.from('player_state').select('*').eq('user_id', userId).maybeSingle();
+          const ps = Array.isArray(psData) ? psData[0] : psData;
+          const [{ count: questsCompleted }, { count: priorSubscriptions }] = await Promise.all([
+            supabase.from('challenge_completions').select('challenge_id', { count: 'exact', head: true }).eq('user_id', userId),
+            supabase.from('subscriptions').select('stripe_subscription_id', { count: 'exact', head: true }).eq('user_id', userId),
+          ]);
+
           // Streak + last_active_at are computed server-side by record_daily_activity()
           // (the client used to compute the streak and write it straight to profiles).
           // It's a no-op on repeat calls within the same UTC day.
@@ -463,6 +665,7 @@ export const createAuthSlice = (set, get) => {
           }
 
           const mappedUser = {
+            id: data.id,
             name: data.display_name || 'Hráč',
             xp: data.xp ?? 0,
             uzel: data.uzel ?? 1,
@@ -478,8 +681,32 @@ export const createAuthSlice = (set, get) => {
             referralCode: data.referral_code || null,
             freeNodeCredits: data.free_node_credits || 0,
             showcaseCardKeys: data.showcase_card_keys || [],
-            displayNameChangeUsed: !!data.display_name_change_used
+            displayNameChangeUsed: !!data.display_name_change_used,
+            // No player_state row = profile predates the onboarding tracking → treat as done.
+            onboardingCompleted: ps ? !!ps.onboarding_completed_at : true,
+            avatarUrl: ps?.avatar_url || null,
+            activeFrame: ps?.active_frame || null,
+            activeAura: ps?.active_aura || null,
+            activeMask: ps?.active_mask || null,
+            displayTitle: ps?.display_title || null,
+            primaryBadge: ps?.primary_badge || null,
+            // Drives "feed only after the first quest" (spec-17 §3).
+            questsCompleted: questsCompleted ?? 0,
+            // spec-13: a player who ever had the Pass comes back at the later price.
+            passLapsed: !data.pass_holder && (priorSubscriptions ?? 0) > 0
           };
+
+          // A signed-in player mid-onboarding resumes it (a new device starts at 'identity').
+          const finished = ps ? !!(ps.onboarding_completed_at || ps.onboarding_skipped_at) : true;
+          const midFlow = POST_LOGIN_STEPS.includes(get().onboardingStep);
+          if (!finished || midFlow) {
+            set({ user: mappedUser, onboarded: false, onboardingStep: midFlow ? get().onboardingStep : 'identity' });
+            localStorage.setItem('user', JSON.stringify(mappedUser));
+            localStorage.removeItem('onboarded');
+            get().loadCurrentNodeData();
+            return;
+          }
+
           set({ user: mappedUser, onboarded: true });
           localStorage.setItem('user', JSON.stringify(mappedUser));
           localStorage.setItem('onboarded', 'true');
@@ -494,6 +721,11 @@ export const createAuthSlice = (set, get) => {
           get().checkSeasonReflectionStatus();
           get().fetchReferralStats();
           get().fetchMysteryBoxes();
+          get().loadIdentityExtras();
+          get().fetchPlayerProgress();
+          get().fetchNotifications();
+          get().fetchIdentityItems();
+          get().fetchBlockedUsers();
         }
       } catch (e) {
         console.warn('Supabase fetchUser failed, using local storage.');
@@ -539,8 +771,6 @@ export const createAuthSlice = (set, get) => {
       try {
         const userId = session.user.id;
 
-        console.log('[Auth] handleOAuthSession start — userId:', userId);
-
         // ── Step 1: try to load an existing profile ──────────────────────
         const { data: profileRow, error: fetchError } = await supabase
           .from('profiles')
@@ -548,10 +778,7 @@ export const createAuthSlice = (set, get) => {
           .eq('id', userId)
           .maybeSingle();
 
-        console.log('[Auth] SELECT profile result:', { found: !!profileRow, error: fetchError?.message, code: fetchError?.code });
-
         if (profileRow) {
-          console.log('[Auth] Profile found → calling fetchUser');
           // Backfill discord_user_id for accounts created before it was ever captured —
           // every Discord login is a free chance to pick it up without a migration.
           if (!profileRow.discord_user_id) {
@@ -581,7 +808,6 @@ export const createAuthSlice = (set, get) => {
         const referredByCode = localStorage.getItem('pendingReferralCode') || null;
 
         for (let attempt = 0; attempt < 5; attempt++) {
-          console.log('[Auth] INSERT attempt', attempt + 1, '— name:', attemptName);
           const { error } = await supabase.from('profiles').insert([{
             id: userId,
             email: session.user.email,
@@ -596,8 +822,15 @@ export const createAuthSlice = (set, get) => {
             referred_by_code: referredByCode
           }]);
           if (!error) {
-            console.log('[Auth] INSERT success');
             localStorage.removeItem('pendingReferralCode');
+            localStorage.removeItem('pendingReferralExplicit');
+            if (referredByCode) {
+              // First/last touch for the referral row (Referral "FIRST TOUCH × LAST TOUCH").
+              const { first, last } = getTouches();
+              const { error: attributionError } = await supabase.rpc('record_referral_attribution', { p_first: first, p_last: last });
+              if (attributionError) console.warn('record_referral_attribution failed.', attributionError);
+              track('referral_registration', { share_type: last?.share_type || first?.share_type || null });
+            }
             await syncDiscordIdentity(session);
             break;
           }
@@ -620,13 +853,12 @@ export const createAuthSlice = (set, get) => {
           return;
         }
 
-        // Fresh profile inserted → brand-new account. Auth just succeeded (this only runs
-        // from the 'login' step), so the next thing they see is the post-login half of the
-        // flow — avatar-upgrade, not the auth screen again.
-        const finalUser = { ...DEFAULT_USER, ...u, name: attemptName, email: session.user.email };
-        set({ user: finalUser, onboardingStep: 'avatar-upgrade' });
+        // Fresh profile inserted → brand-new account. Auth just succeeded, so the next thing
+        // they see is the post-login half of the flow, not the auth screen again.
+        const finalUser = { ...DEFAULT_USER, ...u, id: userId, name: attemptName, email: session.user.email, questsCompleted: 0 };
+        set({ user: finalUser, onboardingStep: 'identity' });
         localStorage.setItem('user', JSON.stringify(finalUser));
-        localStorage.setItem('onboardingStep', 'avatar-upgrade');
+        localStorage.setItem('onboardingStep', 'identity');
         get().loadCurrentNodeData();
         track('local_progress_migrated', { xp: u.xp, uzel: u.uzel, keys: u.keys_count, was_onboarded: get().onboarded });
 

@@ -1,7 +1,10 @@
 import { Fragment, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { keysLabel } from '../../lib/plural';
 import { useUserStore } from '../../store/userStore';
 import { KeyRound, Play, Lock, Crown, Check, ArrowRight } from 'lucide-react';
+import NpcBanner from '../common/NpcBanner';
+import NextMoveCard from '../common/NextMoveCard';
 
 export default function DesktopDashboard() {
   const { user, activeChallenge, allStoryNodes, loadAllStoryNodes } = useUserStore();
@@ -13,12 +16,12 @@ export default function DesktopDashboard() {
   }, []);
 
   const maxNode = allStoryNodes.length > 0 ? allStoryNodes.length : 9;
-  const progressPct = Math.min(100, Math.round(((user?.uzel || 0) / maxNode) * 100));
+  const progressPct = Math.min(100, Math.round(((user?.uzel ?? 0) / maxNode) * 100));
 
   return (
     <div style={{
       flex: 1,
-      overflow: 'hidden',
+      overflowY: 'auto',
       padding: '24px 28px',
       display: 'flex',
       flexDirection: 'column',
@@ -26,6 +29,9 @@ export default function DesktopDashboard() {
       fontFamily: 'Inter, sans-serif',
       height: '100%'
     }}>
+      <NpcBanner />
+      <NextMoveCard compact={false} />
+
       {/* LEVEL + QUEST PATH ROW */}
       <div style={{ display: 'flex', gap: '16px', flexShrink: 0 }}>
         <div style={{
@@ -42,16 +48,16 @@ export default function DesktopDashboard() {
             <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: `conic-gradient(#7C3AED 0% ${progressPct}%,#2A2142 ${progressPct}% 100%)` }}></div>
             <div style={{ position: 'absolute', inset: '3px', borderRadius: '50%', background: '#15111E' }}></div>
             <span style={{ position: 'relative', fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', color: '#F0F0F8' }}>
-              {user?.uzel ?? 3}
+              {user?.uzel ?? 1}
             </span>
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
               <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '13px', color: '#F0F0F8' }}>
-                Uzel {user?.uzel ?? 3} <span style={{ color: '#6B6B8A', fontWeight: '500' }}>Sezóna 0</span>
+                Uzel {user?.uzel ?? 1} <span style={{ color: '#6B6B8A', fontWeight: '500' }}>Sezóna 0</span>
               </span>
               <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: '#60A5FA' }}>
-                {user?.xp || 240} XP
+                {user?.xp ?? 0} XP
               </span>
             </div>
             <div style={{ height: '7px', background: '#2A2142', borderRadius: '4px', overflow: 'hidden' }}>
@@ -74,12 +80,12 @@ export default function DesktopDashboard() {
             Sezóna 0 · cesta
           </span>
           <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: '#A78BFA' }}>
-            Uzel {user?.uzel || 0} / {allStoryNodes.length}
+            Uzel {user?.uzel ?? 0} / {allStoryNodes.length}
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center' }}>
           {allStoryNodes.map((node, idx) => {
-            const uzel = user?.uzel || 0;
+            const uzel = user?.uzel ?? 0;
             const isDone = node.node_order < uzel;
             const isCurrent = node.node_order === uzel;
             const isBoss = node.type === 'REFERENTIAL' || node.type === 'FINAL';
@@ -146,7 +152,7 @@ export default function DesktopDashboard() {
             Pokračovat<br />v příběhu
           </div>
           <div style={{ fontFamily: 'Inter', fontSize: '14px', color: 'rgba(255,255,255,.8)', marginTop: '8px', position: 'relative' }}>
-            Uzel {user?.uzel ?? 3} · Zaya na tebe čeká.
+            Uzel {user?.uzel ?? 1} · Zaya na tebe čeká.
           </div>
           <div style={{ flex: 1 }}></div>
           <button
@@ -197,7 +203,7 @@ export default function DesktopDashboard() {
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginTop: '14px', background: '#1C1630', border: '0.5px solid #382C5C', borderRadius: '20px', padding: '5px 12px', alignSelf: 'flex-start' }}>
                 <span style={{ display: 'inline-flex', width: '14px', height: '14px', color: '#F5B73F' }}><KeyRound size={12} /></span>
                 <span style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F5B73F', fontWeight: '600' }}>
-                  +{activeChallenge.reward_keys} klíče · +{activeChallenge.reward_xp} XP
+                  +{keysLabel(activeChallenge.reward_keys)} · +{activeChallenge.reward_xp} XP
                 </span>
               </div>
               <div style={{ flex: 1 }}></div>

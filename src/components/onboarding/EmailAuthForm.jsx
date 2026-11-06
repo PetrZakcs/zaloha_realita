@@ -8,7 +8,7 @@ import { isValidEmail, isValidPassword } from '../../utils/validation';
 // its outer container (card width, spacing) differs, so this owns all state
 // and just takes a `radius` prop to match whichever platform embeds it.
 export default function EmailAuthForm({ radius = 16 }) {
-  const { registerWithEmail, loginWithEmail } = useUserStore();
+  const { registerWithEmail, loginWithEmail, requestPasswordReset } = useUserStore();
   const [mode, setMode] = useState('register'); // 'register' | 'signin'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -16,6 +16,19 @@ export default function EmailAuthForm({ radius = 16 }) {
   const [submitError, setSubmitError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+
+  const handleForgotPassword = async () => {
+    setSubmitError('');
+    if (!isValidEmail(email)) {
+      setFieldError('Zadej svůj e-mail a klikni znovu.');
+      return;
+    }
+    setFieldError('');
+    const result = await requestPasswordReset(email);
+    if (result.error) setSubmitError(result.error);
+    else setResetSent(true);
+  };
 
   const handleSubmit = async () => {
     setSubmitError('');
@@ -43,7 +56,7 @@ export default function EmailAuthForm({ radius = 16 }) {
       return;
     }
     // Otherwise: registerWithEmail already advanced onboardingStep to
-    // 'avatar-upgrade' itself, or loginWithEmail's success will resolve into
+    // 'identity' itself, or loginWithEmail's success will resolve into
     // onboarded:true asynchronously via App.jsx's auth listener — nothing
     // further to do here in either case.
   };
@@ -175,6 +188,16 @@ export default function EmailAuthForm({ radius = 16 }) {
       >
         {submitting ? 'Chvilku…' : (mode === 'register' ? 'Pokračovat s e-mailem' : 'Přihlásit se e-mailem')}
       </button>
+
+      {mode === 'signin' && (resetSent ? (
+        <div role="status" style={{ color: '#22C55E', fontSize: '12px', fontFamily: 'Inter', textAlign: 'center' }}>
+          Pokud účet existuje, poslali jsme na tento e-mail odkaz pro nastavení nového hesla.
+        </div>
+      ) : (
+        <button type="button" onClick={handleForgotPassword} style={{ background: 'none', border: 'none', color: '#9A9AB5', fontFamily: 'Inter', fontSize: '12px', cursor: 'pointer', padding: '4px' }}>
+          Zapomenuté heslo
+        </button>
+      ))}
     </div>
   );
 }

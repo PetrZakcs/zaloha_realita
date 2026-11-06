@@ -2,9 +2,17 @@
 // card, paywall referral CTA, …) builds links and invokes the share sheet the same way,
 // instead of each screen reinventing its own navigator.share/clipboard fallback.
 
-export function buildReferralLink(referralCode) {
+// Contextual share links (Game Bible · Viral "DEEP LINK ARCHITECTURE"): besides the sharer's
+// invite code a link can carry the quest (q) and the share type (t), so the landing can say
+// "X tě vyzval k Questu …" and the new player lands on that quest after onboarding.
+// See src/lib/attribution.js for the receiving side.
+export function buildReferralLink(referralCode, { questId, shareType } = {}) {
   const base = window.location.origin;
-  return referralCode ? `${base}/?ref=${referralCode}` : base;
+  if (!referralCode) return base;
+  const params = new URLSearchParams({ ref: referralCode });
+  if (questId) params.set('q', questId);
+  if (shareType) params.set('t', shareType);
+  return `${base}/?${params.toString()}`;
 }
 
 // Returns { method: 'native' | 'clipboard', shared: boolean }. Never throws — a cancelled

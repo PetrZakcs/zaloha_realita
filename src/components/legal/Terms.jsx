@@ -15,14 +15,14 @@ export default function Terms() {
         {
           heading: '2. Co aplikace nabízí',
           body: [
-            'Hra Reality je herní aplikace s reálnými výzvami, příběhem a odměnami (XP, klíče, odznaky). Základní obsah je zdarma. Placený doplněk "Hra Pass" odemyká bonusový obsah popsaný v aplikaci v okamžiku nákupu.'
+            'Hra Reality je herní aplikace s reálnými výzvami, příběhem a odměnami (XP, klíče, odznaky). Základní obsah je zdarma. Placený doplněk "Founder Pass" odemyká bonusový obsah popsaný v aplikaci v okamžiku nákupu.'
           ]
         },
         {
-          heading: '3. Hra Pass a platby',
+          heading: '3. Founder Pass a platby',
           body: [
-            'Hra Pass je měsíční předplatné za 149 Kč / měsíc s automatickou obnovou, dokud ho nezrušíš. [DOPLNIT: roční varianta a její cena — bude doplněno.]',
-            'Předplatné lze kdykoliv zrušit [DOPLNIT: postup zrušení / odkaz na správu předplatného]. Zrušení zamezí další obnově, již zaplacené období zůstává aktivní do konce.',
+            'Founder Pass je měsíční předplatné za 149 Kč / měsíc s automatickou obnovou, dokud ho nezrušíš. [DOPLNIT: roční varianta a její cena — bude doplněno.]',
+            'Předplatné lze kdykoliv zrušit v aplikaci v Nastavení → Spravovat / zrušit předplatné. Zrušení zamezí další obnově, již zaplacené období zůstává aktivní do konce.',
             'Platby zpracovává Stripe. Aplikace samotná čísla platebních karet neukládá.'
           ]
         },

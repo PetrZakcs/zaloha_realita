@@ -6,9 +6,11 @@ import { ALL_CARDS, isCardUnlocked } from '../../lib/cards';
 import { getAvatarLevel } from '../../lib/avatarLevels';
 import { Settings as SettingsIcon, Crown, Pencil, Package, ChevronRight } from 'lucide-react';
 import HraPassCard from '../common/HraPassCard';
+import PlayerAvatar from '../common/PlayerAvatar';
+import ProfileIdentitySection from '../common/ProfileIdentitySection';
 
 export default function DesktopProfile() {
-  const { user, openModal, unlockedCards, loadUnlockedCards } = useUserStore();
+  const { user, openModal, unlockedCards, loadUnlockedCards, seasonReflectionSubmitted, ownIdentityVisual } = useUserStore();
   const navigate = useNavigate();
   const [proofs, setProofs] = useState([]);
 
@@ -75,23 +77,7 @@ export default function DesktopProfile() {
         {/* Avatar — level-driven color/glow (spec-10 §6) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
           <div style={{ position: 'relative', width: '112px', height: '112px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <span style={{
-              width: '92px',
-              height: '92px',
-              borderRadius: '50%',
-              background: '#241C3C',
-              border: `${level.borderWidth + 1}px solid ${level.border}`,
-              boxShadow: level.glow ? `0 0 ${level.glow + 6}px ${level.border}88` : 'none',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontFamily: "'Space Grotesk', sans-serif",
-              fontWeight: '700',
-              fontSize: '32px',
-              color: level.color
-            }}>
-              {(user?.name || 'PE').slice(0, 2).toUpperCase()}
-            </span>
+            <PlayerAvatar name={user?.name} avatarUrl={user?.avatarUrl} {...ownIdentityVisual()} level={user?.badges_count} frameKey={user?.activeFrame} npc={user?.onboardingCompleted === false} size={88} />
             {user?.passHolder && (
               <span style={{
                 position: 'absolute',
@@ -173,8 +159,8 @@ export default function DesktopProfile() {
             <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', marginTop: '3px' }}>klíčů</div>
           </div>
           <div style={{ flex: 1, background: '#15111E', border: '0.5px solid #2A2142', borderRadius: '18px', padding: '18px', textAlign: 'center' }}>
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '28px', color: '#F5B73F' }}>{user?.streak ?? 0}</div>
-            <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', marginTop: '3px' }}>dní v řadě</div>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '28px', color: user?.passHolder ? '#F5B73F' : '#6B6B8A' }}>{user?.passHolder ? (user?.streak ?? 0) : '🔒'}</div>
+            <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', marginTop: '3px' }}>{user?.passHolder ? 'dní v řadě' : 'streak s Passem'}</div>
           </div>
           <div style={{ flex: 1, background: '#15111E', border: '0.5px solid #2A2142', borderRadius: '18px', padding: '18px', textAlign: 'center' }}>
             <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '28px', color: '#22C55E' }}>{user?.uzel ?? 0}</div>
@@ -203,6 +189,10 @@ export default function DesktopProfile() {
             >
               <Package size={14} /> Otevřít Inventář <ChevronRight size={14} />
             </div>
+          </div>
+
+          <div style={{ marginBottom: '20px' }}>
+            <ProfileIdentitySection userId={user?.id} isOwn statusTitle={user?.onboardingCompleted === false ? 'NPC' : (seasonReflectionSubmitted ? 'Hráč' : 'Pozorovatel')} passHolder={!!user?.passHolder} />
           </div>
 
           {/* Poslední proofy */}

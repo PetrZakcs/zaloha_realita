@@ -6,9 +6,11 @@ import { ALL_CARDS, isCardUnlocked } from '../../lib/cards';
 import { getAvatarLevel } from '../../lib/avatarLevels';
 import { Settings as SettingsIcon, Crown, ChevronRight, Package } from 'lucide-react';
 import HraPassCard from '../common/HraPassCard';
+import PlayerAvatar from '../common/PlayerAvatar';
+import ProfileIdentitySection from '../common/ProfileIdentitySection';
 
 export default function MobileProfile() {
-  const { user, openModal, unlockedCards, loadUnlockedCards } = useUserStore();
+  const { user, openModal, unlockedCards, loadUnlockedCards, seasonReflectionSubmitted, ownIdentityVisual } = useUserStore();
   const navigate = useNavigate();
   const [proofs, setProofs] = useState([]);
 
@@ -60,23 +62,7 @@ export default function MobileProfile() {
 
           {/* Avatar — level-driven color/glow (spec-10 §6), not a fixed purple ring */}
           <div style={{ position: 'relative', width: '96px', height: '96px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{
-              width: '78px',
-              height: '78px',
-              borderRadius: '50%',
-              background: '#241C3C',
-              border: `${level.borderWidth}px solid ${level.border}`,
-              boxShadow: level.glow ? `0 0 ${level.glow}px ${level.border}88` : 'none',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontFamily: "'Space Grotesk', sans-serif",
-              fontWeight: '700',
-              fontSize: '26px',
-              color: level.color
-            }}>
-              {(user?.name || 'TP').slice(0, 2).toUpperCase()}
-            </span>
+            <PlayerAvatar name={user?.name} avatarUrl={user?.avatarUrl} {...ownIdentityVisual()} level={user?.badges_count} frameKey={user?.activeFrame} npc={user?.onboardingCompleted === false} size={78} />
             {user?.passHolder && (
               <span style={{
                 position: 'absolute',
@@ -136,8 +122,8 @@ export default function MobileProfile() {
             <div style={{ fontFamily: 'Inter', fontSize: '9px', color: '#6B6B8A', marginTop: '2px' }}>XP</div>
           </div>
           <div style={{ background: '#241C3C', border: '0.5px solid #382C5C', borderRadius: '16px', padding: '11px', textAlign: 'center' }}>
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', color: '#F5B73F' }}>{user?.streak ?? 0}</div>
-            <div style={{ fontFamily: 'Inter', fontSize: '9px', color: '#6B6B8A', marginTop: '2px' }}>dní v řadě</div>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', color: user?.passHolder ? '#F5B73F' : '#6B6B8A' }}>{user?.passHolder ? (user?.streak ?? 0) : '🔒'}</div>
+            <div style={{ fontFamily: 'Inter', fontSize: '9px', color: '#6B6B8A', marginTop: '2px' }}>{user?.passHolder ? 'dní v řadě' : 'streak s Passem'}</div>
           </div>
           <div style={{ background: '#241C3C', border: '0.5px solid #382C5C', borderRadius: '16px', padding: '11px', textAlign: 'center', gridColumn: 'span 3' }}>
             <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '19px', color: '#22C55E' }}>Uzel {user?.uzel ?? 0}</div>
@@ -145,7 +131,7 @@ export default function MobileProfile() {
           </div>
         </div>
 
-        {/* HRA PASS Banner */}
+        {/* Founder Pass Banner */}
         <div style={{ padding: '16px 24px 0' }}>
           <HraPassCard compact />
         </div>
@@ -165,6 +151,10 @@ export default function MobileProfile() {
             </div>
           </div>
         )}
+
+        <div style={{ padding: '20px 24px 0' }}>
+          <ProfileIdentitySection userId={user?.id} isOwn statusTitle={user?.onboardingCompleted === false ? 'NPC' : (seasonReflectionSubmitted ? 'Hráč' : 'Pozorovatel')} passHolder={!!user?.passHolder} />
+        </div>
 
         {/* Poslední proofy (spec-10 §2C) */}
         {proofs.length > 0 && (

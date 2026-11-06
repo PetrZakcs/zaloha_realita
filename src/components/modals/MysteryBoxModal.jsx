@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Gift } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
+import ShareMomentButton from '../common/ShareMomentButton';
 
 const RARITY = {
   common: { label: 'Common', color: '#9A9AB5' },
@@ -58,6 +59,10 @@ export default function MysteryBoxModal() {
           {card.description && (
             <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#9A9AB5', marginTop: '12px', lineHeight: 1.5 }}>{card.description}</div>
           )}
+          {/* Game Bible · Viral "COLLECTION DROP CARD" */}
+          <div style={{ width: '100%', marginTop: '14px' }}>
+            <ShareMomentButton variant="collection" progressText={`${card.title} · ${rarity.label}`} label="Sdílet kartu" />
+          </div>
         </>
       ) : (
         <div style={{ margin: '22px 0 14px', color: '#F5B73F', filter: 'drop-shadow(0 0 16px rgba(245,183,63,.5))' }}>

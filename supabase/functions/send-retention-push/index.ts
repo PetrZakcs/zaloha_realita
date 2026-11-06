@@ -17,7 +17,9 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.21.0";
+// @ts-ignore: esm.sh serves a CJS-interop default export at runtime; @types/web-push declares none.
 import webpush from "https://esm.sh/web-push@3.6.7?target=deno";
+import { allowedToSend, type NotificationPrefs } from "./prefs.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -122,9 +124,25 @@ serve(async (req) => {
 
     let sent = 0;
     let failed = 0;
+    let skippedByPrefs = 0;
+
+    // Player preferences (category opt-outs, quiet hours) — notification_preferences.
+    const allIds = [...new Set(batches.flatMap(b => b.userIds))];
+    const prefsByUser = new Map<string, NotificationPrefs>();
+    if (allIds.length > 0) {
+      const { data: prefRows } = await supabase
+        .from("notification_preferences")
+        .select("user_id, categories_off, quiet_start, quiet_end, timezone")
+        .in("user_id", allIds);
+      for (const row of prefRows || []) prefsByUser.set(row.user_id, row);
+    }
 
     for (const batch of batches) {
       for (const userId of batch.userIds) {
+        if (!allowedToSend(batch.notificationKind, prefsByUser.get(userId), today)) {
+          skippedByPrefs++;
+          continue;
+        }
         // Dedup guard: only proceed if this (user, kind, today) hasn't already been logged —
         // protects against a cron overlap/retry double-sending, not just a courtesy.
         const { error: logError } = await supabase
@@ -149,7 +167,8 @@ serve(async (req) => {
             failed++;
             // 404/410 = subscription expired/revoked on the browser's end — clean it up so
             // future runs don't keep retrying a dead endpoint.
-            if (err?.statusCode === 404 || err?.statusCode === 410) {
+            const statusCode = (err as { statusCode?: number } | null)?.statusCode;
+            if (statusCode === 404 || statusCode === 410) {
               await supabase.from("push_subscriptions").delete().eq("id", sub.id);
             } else {
               console.warn(`Push send failed for subscription ${sub.id}:`, err);
@@ -159,7 +178,7 @@ serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ sent, failed }), {
+    return new Response(JSON.stringify({ sent, failed, skippedByPrefs }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

@@ -4,10 +4,13 @@ export default function TypewriterText({ text, speed = 14, onComplete }) {
   const [displayedText, setDisplayedText] = useState('');
   const [currentIndex, setCurrentIndex] = useState(0);
 
+  // Reduced motion: show the whole text at once.
+  const reduceMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
   useEffect(() => {
-    setDisplayedText('');
-    setCurrentIndex(0);
-  }, [text]);
+    setDisplayedText(reduceMotion ? text : '');
+    setCurrentIndex(reduceMotion ? text.length : 0);
+  }, [text, reduceMotion]);
 
   useEffect(() => {
     if (currentIndex < text.length) {

@@ -41,7 +41,13 @@ function makeFakeSupabase(responses: Record<string, Response> = {}) {
 
   return {
     calls,
-    client: { from: (table: string) => builder(table) },
+    client: {
+      from: (table: string) => builder(table),
+      rpc: (name: string, args: unknown) => {
+        calls.push({ table: "rpc", method: name, args: [args] });
+        return Promise.resolve(responses[`rpc.${name}`] ?? { data: null, error: null });
+      },
+    },
   };
 }
 
@@ -281,4 +287,75 @@ Deno.test("subscription deleted while another subscription is live -> keeps pass
 
   assertEquals(res.status, 200);
   assertEquals(find(calls, "profiles", "update")?.args[0], { pass_holder: true });
+});
+
+function invoiceEvent(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "evt_invoice_1",
+    type: "invoice.paid",
+    data: {
+      object: {
+        id: "in_123",
+        subscription: "sub_123",
+        amount_paid: 14900,
+        billing_reason: "subscription_cycle",
+        ...overrides,
+      },
+    },
+  };
+}
+
+Deno.test("invoice.paid -> records the payment for the subscription's player", async () => {
+  const { calls, client } = makeFakeSupabase({
+    "subscriptions.select": { data: { user_id: "user-123" }, error: null },
+  });
+  const handler = createHandler(fakeStripe(invoiceEvent()), () => client as never);
+
+  const res = await handler(req());
+
+  assertEquals(res.status, 200);
+  assertEquals(find(calls, "rpc", "record_pass_payment")?.args[0], {
+    p_user_id: "user-123",
+    p_invoice_id: "in_123",
+    p_amount_czk: 149,
+    p_billing_reason: "subscription_cycle",
+  });
+});
+
+Deno.test("invoice.paid before checkout linked the player -> 500 so Stripe retries", async () => {
+  const { calls, client } = makeFakeSupabase({
+    "subscriptions.select": { data: null, error: null },
+  });
+  const handler = createHandler(fakeStripe(invoiceEvent()), () => client as never);
+
+  const res = await handler(req());
+
+  assertEquals(res.status, 500);
+  assertEquals(find(calls, "rpc", "record_pass_payment"), undefined);
+  assertEquals(find(calls, "stripe_events", "delete")?.method, "delete");
+});
+
+Deno.test("invoice.paid uses metadata when the subscriptions row doesn't exist yet", async () => {
+  const { calls, client } = makeFakeSupabase({
+    "subscriptions.select": { data: null, error: null },
+  });
+  const handler = createHandler(
+    fakeStripe(invoiceEvent({ subscription_details: { metadata: { user_id: "user-456" } } })),
+    () => client as never
+  );
+
+  const res = await handler(req());
+
+  assertEquals(res.status, 200);
+  assertEquals((find(calls, "rpc", "record_pass_payment")?.args[0] as { p_user_id: string }).p_user_id, "user-456");
+});
+
+Deno.test("one-off invoice without a subscription -> ignored", async () => {
+  const { calls, client } = makeFakeSupabase();
+  const handler = createHandler(fakeStripe(invoiceEvent({ subscription: null })), () => client as never);
+
+  const res = await handler(req());
+
+  assertEquals(res.status, 200);
+  assertEquals(find(calls, "rpc", "record_pass_payment"), undefined);
 });

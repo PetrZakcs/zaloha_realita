@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useUserStore } from '../../store/userStore';
+import NodeLoops from '../common/NodeLoops';
 import { LockOpen, Play, Lock, ArrowRight, Check, Terminal, Skull } from 'lucide-react';
 import TypewriterText from '../common/TypewriterText';
 
@@ -135,6 +136,7 @@ export default function DesktopStory() {
               <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '20px', color: '#F0F0F8' }}>
                 {activeChallenge.title}
               </div>
+              <NodeLoops />
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
                 {activeStoryNodeSteps.length > 0 ? (
                   activeStoryNodeSteps.map((step, idx) => (
@@ -280,7 +282,7 @@ export default function DesktopStory() {
           {/* Zigzag nodes list */}
           <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: '22px' }}>
             {[1, 2, 3, 4, 5, 6, 7, 8].map((order) => {
-              const currentUzel = user?.uzel ?? 3;
+              const currentUzel = user?.uzel ?? 1;
               const isCompleted = order < currentUzel;
               const isActive = order === currentUzel;
               const isLocked = order > currentUzel;

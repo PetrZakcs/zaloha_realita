@@ -3,9 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { Flame, KeyRound, ArrowRight, Play, Lock, Crown, Check } from 'lucide-react';
 import HraPassCard from '../common/HraPassCard';
+import NpcBanner from '../common/NpcBanner';
+import PlayerAvatar from '../common/PlayerAvatar';
+import NextMoveCard from '../common/NextMoveCard';
+import { keysLabel } from '../../lib/plural';
 
 export default function MobileDashboard() {
-  const { user, activeChallenge, allStoryNodes, loadAllStoryNodes } = useUserStore();
+  const { user, activeChallenge, allStoryNodes, loadAllStoryNodes, feed, openModal } = useUserStore();
+  const communityPosts = feed.filter(p => p.type === 'PROOF').slice(0, 2);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -37,24 +42,35 @@ export default function MobileDashboard() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#6B6B8A' }}>Celkem XP</div>
           <div data-anim="xp-countup" style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '30px', color: '#4AA8FF', lineHeight: 1.15, textShadow: '0 0 16px rgba(74,168,255,.4)' }}>
-            {user?.xp || 240}
+            {user?.xp ?? 0}
           </div>
         </div>
         <div style={{ width: '0.5px', height: '38px', background: '#382C5C', flexShrink: 0 }}></div>
-        <div data-anim="streak" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
-          <span className="flame-ico" style={{ display: 'inline-flex', width: '22px', height: '22px', color: '#F5B73F' }}><Flame size={20} /></span>
-          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '14px', color: '#F5B73F', lineHeight: 1 }}>{user?.streak || 5}</span>
-          <span style={{ fontFamily: 'Inter', fontSize: '8px', color: '#6B6B8A', letterSpacing: '.04em' }}>DNÍ V ŘADĚ</span>
-        </div>
+        {/* spec-13 C: streak tracking is part of the Pass; the server keeps counting either way. */}
+        {user?.passHolder ? (
+          <div data-anim="streak" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
+            <span className="flame-ico" style={{ display: 'inline-flex', width: '22px', height: '22px', color: '#F5B73F' }}><Flame size={20} /></span>
+            <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '14px', color: '#F5B73F', lineHeight: 1 }}>{user?.streak ?? 0}</span>
+            <span style={{ fontFamily: 'Inter', fontSize: '8px', color: '#6B6B8A', letterSpacing: '.04em' }}>DNÍ V ŘADĚ</span>
+          </div>
+        ) : (
+          <button type="button" onClick={() => openModal('paywall')} aria-label="Streak je součástí Founder Passu" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', flexShrink: 0, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+            <span style={{ display: 'inline-flex', width: '22px', height: '22px', color: '#6B6B8A' }}><Lock size={18} /></span>
+            <span style={{ fontFamily: 'Inter', fontSize: '8px', color: '#6B6B8A', letterSpacing: '.04em' }}>STREAK S PASSEM</span>
+          </button>
+        )}
         <div style={{ width: '0.5px', height: '38px', background: '#382C5C', flexShrink: 0 }}></div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
           <span style={{ display: 'inline-flex', width: '22px', height: '22px', color: '#F5B73F' }}><KeyRound size={20} /></span>
-          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '14px', color: '#F5B73F', lineHeight: 1 }}>{user?.keys_count || 7}</span>
+          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '14px', color: '#F5B73F', lineHeight: 1 }}>{user?.keys_count ?? 0}</span>
           <span style={{ fontFamily: 'Inter', fontSize: '8px', color: '#6B6B8A', letterSpacing: '.04em' }}>KLÍČŮ</span>
         </div>
       </div>
 
-      {/* HRA PASS PROMO CARD */}
+      <NpcBanner />
+      <NextMoveCard compact={true} />
+
+      {/* FOUNDER PASS PROMO CARD */}
       <HraPassCard />
 
       {/* QUEST PATH */}
@@ -62,11 +78,11 @@ export default function MobileDashboard() {
         <div style={{ flexShrink: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '9px' }}>
             <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#6B6B8A' }}>Sezóna 0 · cesta</span>
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', color: '#A78BFA' }}>Uzel {user?.uzel || 0} / {allStoryNodes.length}</span>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', color: '#A78BFA' }}>Uzel {user?.uzel ?? 0} / {allStoryNodes.length}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             {allStoryNodes.map((node, idx) => {
-              const uzel = user?.uzel || 0;
+              const uzel = user?.uzel ?? 0;
               const isDone = node.node_order < uzel;
               const isCurrent = node.node_order === uzel;
               const isBoss = node.type === 'REFERENTIAL' || node.type === 'FINAL';
@@ -132,7 +148,7 @@ export default function MobileDashboard() {
           Pokračovat v příběhu
         </div>
         <div style={{ fontFamily: 'Inter', fontSize: '13px', color: 'rgba(255,255,255,.78)', marginTop: '6px', position: 'relative' }}>
-          Uzel {user?.uzel ?? 3} · Zaya čeká
+          Uzel {user?.uzel ?? 1} · Zaya čeká
         </div>
         <span style={{ position: 'absolute', right: 18, top: '50%', transform: 'translateY(-50%)', display: 'inline-flex', width: '26px', height: '26px', color: '#fff', zIndex: 1 }}>
           <ArrowRight size={22} />
@@ -152,7 +168,7 @@ export default function MobileDashboard() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#8B5CF6' }}>
-                Výzva {user?.uzel ?? 3} · Mikro-akce
+                Výzva {user?.uzel ?? 1}
               </div>
               <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: '700', fontSize: '16px', marginTop: '6px', color: '#F0F0F8' }}>
                 {activeChallenge.title}
@@ -162,7 +178,7 @@ export default function MobileDashboard() {
               </div>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '10px', background: '#1C1630', border: '0.5px solid #382C5C', borderRadius: '20px', padding: '3px 10px' }}>
                 <span style={{ display: 'inline-flex', width: '13px', height: '13px', color: '#F5B73F' }}><KeyRound size={12} /></span>
-                <span style={{ fontFamily: 'Inter', fontSize: '11px', color: '#F5B73F', fontWeight: '600' }}>+{activeChallenge.reward_keys} klíče</span>
+                <span style={{ fontFamily: 'Inter', fontSize: '11px', color: '#F5B73F', fontWeight: '600' }}>+{keysLabel(activeChallenge.reward_keys)}</span>
               </div>
             </div>
             <button
@@ -187,52 +203,27 @@ export default function MobileDashboard() {
         </div>
       )}
 
-      {/* COMMUNITY PREVIEW */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#6B6B8A', marginBottom: '2px' }}>
-          Komunita · právě teď
+      {/* COMMUNITY PREVIEW — real public proofs only; after the first quest (spec-17 §3) */}
+      {user?.questsCompleted > 0 && communityPosts.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: '#6B6B8A', marginBottom: '2px' }}>
+            Komunita · právě teď
+          </div>
+          {communityPosts.map(post => (
+            <div key={post.id} onClick={() => navigate('/feed')} style={{ display: 'flex', gap: '10px', alignItems: 'center', background: '#241C3C', border: '0.5px solid #382C5C', borderRadius: '16px', padding: '10px 12px', cursor: 'pointer' }}>
+              <PlayerAvatar name={post.user_name} avatarUrl={post.author_avatar_url} level={post.author_avatar_level ?? 1} frameKey={post.author_frame || (post.author_pass_holder ? 'frame-founder' : null)} npc={post.author_onboarded === false} size={32} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '12px', color: '#F0F0F8' }}>{post.user_name}</div>
+                <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{post.content}</div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '2px', color: '#6B6B8A', fontFamily: "'JetBrains Mono', monospace", fontSize: '10px' }}>
+                <span style={{ display: 'inline-flex', width: '12px', height: '12px', color: '#F5B73F' }}><Flame size={12} /></span>
+                {post.reactions_fire}
+              </div>
+            </div>
+          ))}
         </div>
-        
-        {/* Card 1 */}
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', background: '#241C3C', border: '0.5px solid #382C5C', borderRadius: '16px', padding: '10px 12px' }}>
-          <span style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#241a3d', border: '1.5px solid #7C3AED', flexShrink: 0 }}></span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '12px' }}>RychlýDoer</span>
-              <span style={{ fontFamily: 'Inter', fontSize: '9px', color: '#A78BFA', border: '1px solid #A78BFA', boxShadow: '0 0 8px rgba(167,139,250,.4)', borderRadius: '20px', padding: '1px 7px' }}>Doer</span>
-            </div>
-            <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              Sebral jsem 3 kelímky u zastávky…
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', color: '#6B6B8A', fontFamily: "'JetBrains Mono', monospace", fontSize: '10px' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-              <span style={{ display: 'inline-flex', width: '12px', height: '12px', color: '#F5B73F' }}><Flame size={12} /></span>
-              12
-            </span>
-          </div>
-        </div>
-
-        {/* Card 2 */}
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', background: '#241C3C', border: '0.5px solid #382C5C', borderRadius: '16px', padding: '10px 12px' }}>
-          <span style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#1f2a3d', border: '1.5px solid #7C3AED', flexShrink: 0 }}></span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '12px' }}>NeonLiška</span>
-              <span style={{ fontFamily: 'Inter', fontSize: '9px', color: '#A78BFA', border: '1px solid #A78BFA', boxShadow: '0 0 8px rgba(167,139,250,.4)', borderRadius: '20px', padding: '1px 7px' }}>Doer</span>
-            </div>
-            <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              Vzal jsem ségru na 5min cleanup…
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', color: '#6B6B8A', fontFamily: "'JetBrains Mono', monospace", fontSize: '10px' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-              <span style={{ display: 'inline-flex', width: '12px', height: '12px', color: '#F5B73F' }}><Flame size={12} /></span>
-              21
-            </span>
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

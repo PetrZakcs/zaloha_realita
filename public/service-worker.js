@@ -1,5 +1,7 @@
-const CACHE_NAME = 'hra-reality-v1';
-const APP_SHELL = ['/', '/manifest.json', '/favicon.ico'];
+// Bump when the caching strategy changes; old caches are removed on activate.
+const CACHE_NAME = 'hra-reality-v2';
+const ASSET_CACHE_LIMIT = 40;
+const APP_SHELL = ['/', '/manifest.json', '/favicon.ico', '/logo192.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -17,32 +19,65 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+async function putAndTrim(request, response) {
+  const cache = await caches.open(CACHE_NAME);
+  await cache.put(request, response);
+  // Every deploy adds new hashed bundles; without a limit they pile up forever.
+  const assets = (await cache.keys()).filter((key) => new URL(key.url).pathname.startsWith('/static/'));
+  await Promise.all(assets.slice(0, Math.max(0, assets.length - ASSET_CACHE_LIMIT)).map((key) => cache.delete(key)));
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
 
   // Never intercept cross-origin requests (Supabase API/Storage/Auth) — those must
   // always hit the network directly, never served from cache.
-  if (new URL(request.url).origin !== self.location.origin) return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
   if (request.method !== 'GET') return;
 
   if (request.mode === 'navigate') {
-    // Network-first for page loads, falling back to the cached shell when offline.
-    event.respondWith(fetch(request).catch(() => caches.match('/')));
+    // Network-first, keeping the offline shell in step with the latest deploy.
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put('/', copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match('/'))
+    );
     return;
   }
 
-  // Cache-first for static build assets (JS/CSS/images).
+  // Hashed build assets never change: cache-first.
+  if (url.pathname.startsWith('/static/')) {
+    event.respondWith(
+      caches.match(request).then((cached) => {
+        if (cached) return cached;
+        return fetch(request).then((response) => {
+          if (response.ok) putAndTrim(request, response.clone());
+          return response;
+        });
+      })
+    );
+    return;
+  }
+
+  // Everything else (manifest, icons) keeps its name across deploys: network-first, so it can't
+  // go stale; the cached copy is only the offline fallback.
   event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request).then((response) => {
+    fetch(request)
+      .then((response) => {
         if (response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
         }
         return response;
-      });
-    })
+      })
+      .catch(() => caches.match(request))
   );
 });
 
