@@ -1,3 +1,4 @@
+import CommunityBanner from '../common/CommunityBanner';
 import LeaderboardBoard from '../common/LeaderboardBoard';
 
 export default function MobileLeaderboard() {
@@ -29,6 +30,7 @@ export default function MobileLeaderboard() {
         </span>
       </div>
 
+      <div style={{ padding: '0 16px' }}><CommunityBanner /></div>
       <LeaderboardBoard compact />
     </div>
   );

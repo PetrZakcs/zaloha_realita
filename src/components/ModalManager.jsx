@@ -16,6 +16,8 @@ import IdentityReveal from './modals/IdentityReveal';
 import { getPushStatus, subscribeToPush, unsubscribeFromPush } from '../lib/push';
 import { startCheckout } from '../lib/checkout';
 import { isSoundMuted, playSound, setSoundMuted } from '../lib/sfx';
+import { DISCORD_INVITE_URL } from '../lib/links';
+import PrivacySettings from './common/PrivacySettings';
 import {
   X, Check, KeyRound, Lock, Crown, ArrowRight, Shield, Zap,
   ImageIcon, Globe, Bell, Sparkles, Loader2, Volume2, VolumeX, Clock, Share2, Users, Sunrise, Rocket, Award, LogOut, Trash2
@@ -24,7 +26,6 @@ import OnboardingFlow from './modals/OnboardingFlow';
 import SeasonReflectionFlow from './modals/SeasonReflectionFlow';
 
 const YEARLY_PASS_ENABLED = process.env.REACT_APP_PASS_YEARLY_ENABLED === 'true';
-const DISCORD_INVITE_URL = process.env.REACT_APP_DISCORD_INVITE_URL || '';
 
 export default function ModalManager() {
   const navigate = useNavigate();
@@ -885,6 +886,12 @@ export default function ModalManager() {
               </button>
             )}
 
+            {lastReward?.awaitingModeration && (
+              <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#9A9AB5', marginTop: '12px', textAlign: 'center' }}>
+                Tvůj důkaz se ve feedu objeví po krátké kontrole obsahu.
+              </div>
+            )}
+
             {/* spec-17 §14: sharing only at strong moments — here the first proof (+1 klíč, not
                 mandatory, 1 click). First box/title/mask, purchase and the certificate have
                 their own share buttons. */}
@@ -1060,6 +1067,7 @@ export default function ModalManager() {
                 { Icon: Sparkles, text: 'Zvýrazněné a viditelnější důkazy ve feedu' },
                 { Icon: Award, text: 'Plný certifikát po dokončení sezóny' },
                 { Icon: KeyRound, text: 'Streak a sbírání fragmentů kódu' },
+                { Icon: Zap, text: 'O 20 % více XP a klíč navíc za milníky' },
               ].map(({ Icon, text }) => (
                 <div key={text} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#1C1630', borderRadius: '12px', padding: '10px 12px' }}>
                   <span style={{ color: '#F5B73F', display: 'inline-flex' }}><Icon size={16} /></span>
@@ -1620,6 +1628,8 @@ export default function ModalManager() {
                 Správa obsahu (Admin) 🛠️
               </button>
             )}
+
+            <PrivacySettings userId={user?.id} />
 
             {/* spec-12 §3: community lives on Discord — direct link from the app */}
             {DISCORD_INVITE_URL && (

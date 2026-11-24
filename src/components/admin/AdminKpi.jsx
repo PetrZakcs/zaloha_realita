@@ -69,11 +69,15 @@ export default function AdminKpi() {
   const [days, setDays] = useState(30);
   const [data, setData] = useState(null);
   const [business, setBusiness] = useState(null);
+  const [extended, setExtended] = useState(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
     setData(null);
+    supabase.rpc('admin_kpi_extended', { p_days: days }).then(({ data: snapshot }) => {
+      if (!cancelled) setExtended(snapshot || null);
+    });
     supabase.rpc('admin_kpi_business', { p_days: days }).then(({ data: snapshot }) => {
       if (!cancelled) setBusiness(snapshot || null);
     });
@@ -146,6 +150,45 @@ export default function AdminKpi() {
                   <Tile label="Odměny z Passů pozvaných" value={num(business.renewal.referral_purchase_rewards)} />
                 </div>
               </Section>
+              {extended && (
+                <>
+                  <Section title="Důkazy" note="Za zvolené období.">
+                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                      <Tile label="Hráči s 1+ důkazem" value={num(extended.proofs.players_1_plus)} />
+                      <Tile label="Hráči s 3+ důkazy" value={num(extended.proofs.players_3_plus)} />
+                      <Tile label="Průměr na hráče" value={extended.proofs.avg_per_player ?? '—'} />
+                      <Tile label="Foto / video / text" value={`${num(extended.proofs.photo)} / ${num(extended.proofs.video)} / ${num(extended.proofs.text)}`} />
+                      <Tile label="Veřejné / soukromé" value={`${num(extended.proofs.public)} / ${num(extended.proofs.private)}`} />
+                    </div>
+                  </Section>
+                  <Section title="Návyk a komunita" note="Distribuce streaků je aktuální stav.">
+                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                      <Tile label="Streak 1–2 / 3–4 / 5–6 / 7+" value={`${num(extended.streaks['1_2'])} / ${num(extended.streaks['3_4'])} / ${num(extended.streaks['5_6'])} / ${num(extended.streaks['7_plus'])}`} />
+                      <Tile label="Session na hráče" value={extended.sessions.avg_per_player ?? '—'} />
+                      <Tile label="Otevřeli feed" value={num(extended.sessions.feed_openers)} />
+                      <Tile label="Reagující hráči" value={num(extended.sessions.reacting_players)} />
+                      <Tile label="Zobrazení profilů" value={`${num(extended.sessions.profile_views)} (${num(extended.sessions.profile_viewers)} hráčů)`} />
+                    </div>
+                  </Section>
+                  <Section title="Integrace" note="Po dokončení sezóny.">
+                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                      <Tile label="Vstoupili" value={num(extended.integration.started)} />
+                      <Tile label="1+ signál" value={num(extended.integration.signals_1_plus)} />
+                      <Tile label="3+ signály" value={num(extended.integration.signals_3_plus)} />
+                      <Tile label="Fragmenty" value={num(extended.integration.fragments)} />
+                      <Tile label="První cyklus" value={num(extended.integration.first_cycle_players)} />
+                      <Tile label="Cykly celkem" value={num(extended.integration.cycles)} />
+                      <Tile label="V mezivrstvě" value={num(extended.integration.bridge_players)} />
+                    </div>
+                  </Section>
+                  <Section title="Po nákupu">
+                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                      <Tile label="Medián dní do nákupu" value={extended.purchase.median_days_to_purchase ?? '—'} />
+                      <Tile label="Aktivní po nákupu" value={num(extended.purchase.active_after_purchase)} />
+                    </div>
+                  </Section>
+                </>
+              )}
               <Section title="Reference" note="Referenční uzel: tvrdá data o hodnotě.">
                 <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                   <Tile label="Dokončili" value={num(business.reference.completed)} />

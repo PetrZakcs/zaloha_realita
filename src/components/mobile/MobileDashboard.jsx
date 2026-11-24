@@ -6,6 +6,7 @@ import HraPassCard from '../common/HraPassCard';
 import NpcBanner from '../common/NpcBanner';
 import PlayerAvatar from '../common/PlayerAvatar';
 import NextMoveCard from '../common/NextMoveCard';
+import HomeQuickMenu from '../common/HomeQuickMenu';
 import { keysLabel } from '../../lib/plural';
 
 export default function MobileDashboard() {
@@ -69,6 +70,7 @@ export default function MobileDashboard() {
 
       <NpcBanner />
       <NextMoveCard compact={true} />
+      <HomeQuickMenu />
 
       {/* FOUNDER PASS PROMO CARD */}
       <HraPassCard />

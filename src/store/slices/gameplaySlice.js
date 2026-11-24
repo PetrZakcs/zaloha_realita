@@ -3,6 +3,7 @@ import { track } from '../../lib/analytics';
 import { levelFromXp } from '../../lib/levels';
 import { compressImage } from '../../lib/compressImage';
 import { scrubVideoLocation } from '../../lib/stripMetadata';
+import { requestProofModeration } from '../../lib/moderation';
 
 // Stored reference to a file in the private bucket. Not fetchable as is: "Moje důkazy" turns it
 // into a short-lived signed URL (src/lib/privateMedia.js).
@@ -276,6 +277,7 @@ export const createGameplaySlice = (set, get) => ({
         firstQuest: !result.already_completed && (u.questsCompleted ?? 0) === 0,
         proofText: proofData.text || null,
         hasMedia: !!proofData.photoFile,
+        awaitingModeration: !!proofData.is_public && !result.already_completed,
         // Lifetime Level (Game Bible) before/after — drives the "Posunul(a) jsem se" rank card.
         lifetimeLevelBefore: levelFromXp(u.xp || 0),
         lifetimeLevelAfter: levelFromXp(result.new_xp)
@@ -283,6 +285,10 @@ export const createGameplaySlice = (set, get) => ({
     });
     localStorage.setItem('user', JSON.stringify(updatedUser));
     localStorage.setItem('proofsSubmittedCount', String(proofsSubmitted));
+
+    // Fire and forget: a public proof stays hidden until this approves it, and the server retries
+    // whatever this call doesn't get to.
+    if (proofData.is_public) requestProofModeration(get().fetchFeedPosts);
 
     get().loadUnlockedCards();
     get().fetchFeedPosts();

@@ -55,6 +55,8 @@ SELECT 'B streak now (expect 3):', current_streak, longest_streak FROM profiles 
 SELECT 'referral qualified:', qualified_at IS NOT NULL FROM referral_signups;
 SELECT 'A identity items:', string_agg(item_key, ',') FROM player_identity_items WHERE user_id='a1b2c3d4-1111-4aaa-8aaa-123456789abc';
 SELECT 'A notifications:', string_agg(category||'/'||title, ' | ' ORDER BY created_at) FROM player_notifications WHERE user_id='a1b2c3d4-1111-4aaa-8aaa-123456789abc';
+-- moderate-proof's job in production: everything so far passed the check
+UPDATE feed_posts SET moderation_status='approved' WHERE moderation_status='pending';
 -- ===== A reacts on B's post
 SET ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub','a1b2c3d4-1111-4aaa-8aaa-123456789abc',false);
@@ -210,3 +212,135 @@ SELECT set_config('request.jwt.claim.sub',:'alfa',false);
 SELECT 'delete account:', delete_my_account();
 RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);
 SELECT 'profile/auth/posts left (expect 0 0 0):', (SELECT count(*) FROM profiles WHERE id=:'alfa'), (SELECT count(*) FROM auth.users WHERE id=:'alfa'), (SELECT count(*) FROM feed_posts WHERE user_id=:'alfa');
+
+-- ================================================================
+-- AI moderation
+-- ================================================================
+\echo '--- moderation'
+SELECT 'mod' AS section;
+INSERT INTO auth.users (id, email) VALUES ('6a6a6a6a-1111-4ccc-accc-0f0f0f0f0f0f','autor@example.com'), ('6b6b6b6b-2222-4ccc-accc-0f0f0f0f0f0f','divak@example.com') ON CONFLICT DO NOTHING;
+INSERT INTO profiles (id, display_name) VALUES ('6a6a6a6a-1111-4ccc-accc-0f0f0f0f0f0f','Autor'), ('6b6b6b6b-2222-4ccc-accc-0f0f0f0f0f0f','Divak') ON CONFLICT (id) DO NOTHING;
+\set autor '6a6a6a6a-1111-4ccc-accc-0f0f0f0f0f0f'
+\set divak '6b6b6b6b-2222-4ccc-accc-0f0f0f0f0f0f'
+\set modadmin '5a5a5a5a-3333-4ccc-accc-0f0f0f0f0f0f'
+INSERT INTO feed_posts (id, user_id, user_name, content, is_public, moderation_status) VALUES
+  ('7a7a7a7a-0001-4ccc-accc-0f0f0f0f0f0f', :'autor', 'Autor', 'forged approved', true, 'approved');
+INSERT INTO feed_posts (id, user_id, user_name, content, is_public, media_type) VALUES
+  ('7a7a7a7a-0002-4ccc-accc-0f0f0f0f0f0f', :'autor', 'Autor', 'video', true, 'video'),
+  ('7a7a7a7a-0003-4ccc-accc-0f0f0f0f0f0f', :'autor', 'Autor', 'private', false, 'image');
+INSERT INTO feed_posts (id, user_id, user_name, type, content, is_public) VALUES
+  ('7a7a7a7a-0004-4ccc-accc-0f0f0f0f0f0f', :'autor', 'Hra Reality', 'WORLD', 'world', true);
+SELECT 'insert status (expect pending/needs_review/not_required/approved):', string_agg(moderation_status, '/' ORDER BY id) FROM feed_posts WHERE id::text LIKE '7a7a7a7a%';
+
+SET ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub',:'divak',false);
+SELECT 'viewer sees (expect only world):', string_agg(content, ',') FROM feed_posts WHERE id::text LIKE '7a7a7a7a%';
+SELECT 'get_feed hides pending (expect 0):', count(*) FROM get_feed(100) WHERE id = '7a7a7a7a-0001-4ccc-accc-0f0f0f0f0f0f';
+DO $$ BEGIN PERFORM claim_posts_for_moderation(NULL, 10); RAISE NOTICE 'BUG: player claimed'; EXCEPTION WHEN insufficient_privilege THEN RAISE NOTICE 'ok: claim denied'; END $$;
+DO $$ BEGIN PERFORM apply_ai_moderation('7a7a7a7a-0001-4ccc-accc-0f0f0f0f0f0f','allow','{}','x','m'); RAISE NOTICE 'BUG: player applied'; EXCEPTION WHEN insufficient_privilege THEN RAISE NOTICE 'ok: apply denied'; END $$;
+DO $$ BEGIN PERFORM admin_moderate_post('7a7a7a7a-0001-4ccc-accc-0f0f0f0f0f0f','approve'); RAISE NOTICE 'BUG: player approved'; EXCEPTION WHEN insufficient_privilege THEN RAISE NOTICE 'ok: admin rpc denied'; END $$;
+SELECT set_config('request.jwt.claim.sub',:'autor',false);
+SELECT 'author sees own (expect 4):', count(*) FROM feed_posts WHERE id::text LIKE '7a7a7a7a%' AND user_id = :'autor';
+RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);
+
+SET ROLE service_role;
+SELECT 'claim (expect autor posts, pending only):', count(*) FROM claim_posts_for_moderation(:'autor', 10);
+SELECT 'second claim is empty (expect 0):', count(*) FROM claim_posts_for_moderation(:'autor', 10);
+SELECT 'ai reject:', apply_ai_moderation('7a7a7a7a-0001-4ccc-accc-0f0f0f0f0f0f','reject',ARRAY['sexual'],'Nahota.','claude-test');
+SELECT 'ai cannot overwrite (expect null):', apply_ai_moderation('7a7a7a7a-0001-4ccc-accc-0f0f0f0f0f0f','allow','{}','x','claude-test');
+RESET ROLE;
+SELECT 'player notified (expect 1):', count(*) FROM player_notifications WHERE user_id = :'autor' AND ref_id = '7a7a7a7a-0001-4ccc-accc-0f0f0f0f0f0f';
+
+SET ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub',:'modadmin',false);
+SELECT 'admin overrides ai:', admin_moderate_post('7a7a7a7a-0001-4ccc-accc-0f0f0f0f0f0f','approve');
+DO $$ BEGIN PERFORM admin_moderate_post('7a7a7a7a-0003-4ccc-accc-0f0f0f0f0f0f','approve'); RAISE NOTICE 'BUG: private approved'; EXCEPTION WHEN invalid_parameter_value THEN RAISE NOTICE 'ok: private stays private'; END $$;
+SELECT set_config('request.jwt.claim.sub',:'divak',false);
+SELECT 'approved visible (expect 1):', count(*) FROM get_feed(100) WHERE id = '7a7a7a7a-0001-4ccc-accc-0f0f0f0f0f0f';
+SELECT set_config('request.jwt.claim.sub',:'modadmin',false);
+SELECT 'admin takes down:', admin_moderate_post('7a7a7a7a-0001-4ccc-accc-0f0f0f0f0f0f','reject','Nahlášeno.');
+SELECT set_config('request.jwt.claim.sub',:'divak',false);
+SELECT 'taken down hidden (expect 0):', count(*) FROM get_feed(100) WHERE id = '7a7a7a7a-0001-4ccc-accc-0f0f0f0f0f0f';
+RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);
+
+-- reports hide an approved post; admin approval restores it and clears them
+UPDATE feed_posts SET moderation_status='approved', is_public=false, hidden_by_reports=true WHERE id='7a7a7a7a-0001-4ccc-accc-0f0f0f0f0f0f';
+INSERT INTO feed_reports (post_id, reporter_id, reason) VALUES ('7a7a7a7a-0001-4ccc-accc-0f0f0f0f0f0f', :'divak', 'spam');
+SET ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub',:'modadmin',false);
+SELECT 'admin restores:', admin_moderate_post('7a7a7a7a-0001-4ccc-accc-0f0f0f0f0f0f','approve');
+RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);
+SELECT 'restored public + clean (expect t f 0):', is_public, hidden_by_reports, (SELECT count(*) FROM feed_reports r WHERE r.post_id=f.id) FROM feed_posts f WHERE id='7a7a7a7a-0001-4ccc-accc-0f0f0f0f0f0f';
+SELECT 'log entries (expect 4):', count(*) FROM moderation_log WHERE post_id='7a7a7a7a-0001-4ccc-accc-0f0f0f0f0f0f';
+
+-- attempts run out → admin queue, never stuck in pending
+INSERT INTO feed_posts (id, user_id, user_name, content, is_public) VALUES ('7a7a7a7a-0005-4ccc-accc-0f0f0f0f0f0f', :'autor', 'Autor', 'stuck', true);
+UPDATE feed_posts SET moderation_attempts=3, moderation_claimed_at=timezone('utc',now())-interval '6 minutes' WHERE id='7a7a7a7a-0005-4ccc-accc-0f0f0f0f0f0f';
+SET ROLE service_role;
+SELECT 'claim after 3 attempts (expect 0):', count(*) FROM claim_posts_for_moderation(:'autor', 10);
+RESET ROLE;
+SELECT 'stuck goes to review:', moderation_status FROM feed_posts WHERE id='7a7a7a7a-0005-4ccc-accc-0f0f0f0f0f0f';
+
+-- ===== MVP1 complete: Pass bonus, integration phase, bridge, featured cards, privacy, extended KPI
+\set bonus '6c1c6c1c-7777-4ccc-accc-0f0f0f0f0f0f'
+\set hrac 'f9e8d7c6-2222-4bbb-9bbb-cba987654321'
+INSERT INTO auth.users (id,email) VALUES (:'bonus','bonus@x.cz');
+INSERT INTO profiles (id,email,display_name) VALUES (:'bonus','bonus@x.cz','Bonus');
+SELECT set_config('app.bypass_profile_guard','true',false);
+UPDATE profiles SET pass_holder=true, uzel=1 WHERE id=:'bonus';
+SELECT set_config('app.bypass_profile_guard','',false);
+SELECT 'founder aura from pass (expect aura-founder-pass):', string_agg(item_key, ',') FROM player_identity_items WHERE user_id=:'bonus';
+SELECT xp FROM profiles WHERE id=:'bonus' \gset before_
+SET ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub',:'bonus',false);
+SELECT 'pass xp bonus (gain, then c1a reward * 1.2):', new_xp - :before_xp, (SELECT round(reward_xp*1.2)::int FROM challenges WHERE id='c1a') FROM complete_challenge('c1a','proof bonus',NULL,true);
+SELECT 'pass holder before reflection (expect f):', (get_integration_state()->>'active')::boolean;
+RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);
+
+SET ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub',:'hrac',false);
+SELECT 'integration active, day, unlocked:', (s->>'active'), (s->>'day'), (SELECT count(*) FROM jsonb_array_elements(s->'signals') e WHERE (e->>'unlocked')::boolean) FROM get_integration_state() s;
+SELECT 'no pass: xp, no fragment:', complete_integration_signal('int-1','Dnes jsem to udělal.');
+SELECT 'repeat is safe (expect already_completed true):', complete_integration_signal('int-1','Znovu.')->>'already_completed';
+DO $$ BEGIN PERFORM complete_integration_signal('bridge-5','Příliš brzy.'); RAISE NOTICE 'BUG: locked signal completed'; EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'ok locked signal refused'; END $$;
+DO $$ BEGIN PERFORM complete_integration_signal('int-1','   '); RAISE NOTICE 'BUG: empty answer accepted'; EXCEPTION WHEN SQLSTATE '22023' THEN RAISE NOTICE 'ok empty answer refused'; END $$;
+SELECT 'players cannot read signals table (expect 0):', count(*) FROM integration_signals;
+RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);
+
+-- Pass holder: fragments roll into a cycle that pays keys. Everything unlocked by moving the start back.
+INSERT INTO season_reflections (user_id, transformation_percent, would_recommend, referral_intent, sentence_template, sentence_text)
+VALUES (:'bonus', 80, true, 2, 1, 'Jsem jiný.');
+UPDATE player_integration SET started_at = timezone('utc',now()) - interval '60 days' WHERE user_id=:'bonus';
+SELECT keys_balance FROM profiles WHERE id=:'bonus' \gset before_
+SET ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub',:'bonus',false);
+SELECT 'signal '||id||':', complete_integration_signal(id,'Odpověď.') FROM unnest(ARRAY['int-1','int-2','int-3','int-4','int-5']) id;
+SELECT 'fragments and cycles (expect 5+ and 1):', s->>'fragments', s->>'cycles' FROM get_integration_state() s;
+RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);
+SELECT 'cycle paid one key (expect 1):', keys_balance - :before_keys_balance FROM profiles WHERE id=:'bonus';
+
+-- featured cards: admin only, in the feed
+SET ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub',:'hrac',false);
+DO $$ BEGIN PERFORM publish_featured_post('Hack'); RAISE NOTICE 'BUG: player published featured'; EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'ok player refused'; END $$;
+SELECT set_config('request.jwt.claim.sub',:'modadmin',false);
+SELECT 'featured published:', publish_featured_post('Skvělý moment.') IS NOT NULL;
+SELECT 'featured in feed (expect 1):', count(*) FROM get_feed(100) WHERE type='FEATURED';
+SELECT 'extended kpi keys:', string_agg(k, ',' ORDER BY k) FROM jsonb_object_keys(admin_kpi_extended(30)) k;
+SELECT set_config('request.jwt.claim.sub',:'hrac',false);
+DO $$ BEGIN PERFORM admin_kpi_extended(30); RAISE NOTICE 'BUG: player read kpi'; EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'ok kpi refused'; END $$;
+-- privacy: own row only, readable by others
+SELECT 'privacy saved:', set_my_privacy(false, true, false);
+SELECT set_config('request.jwt.claim.sub',:'divak',false);
+SELECT 'privacy readable (expect f t f):', show_progress, show_proofs, show_collection FROM player_privacy WHERE user_id=:'hrac';
+UPDATE player_privacy SET show_progress=true WHERE user_id=:'hrac';
+SELECT 'other player cannot change it (expect f):', show_progress FROM player_privacy WHERE user_id=:'hrac';
+RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);
+
+-- rank up: only configured levels reach the feed, as approved STATUS cards
+SELECT set_config('app.bypass_profile_guard','true',false);
+UPDATE game_config SET value='[50]' WHERE key='status_post_levels';
+UPDATE profiles SET xp=10000000 WHERE id=:'bonus';
+SELECT set_config('app.bypass_profile_guard','',false);
+SELECT 'rank-up status card (type, status):', type, moderation_status FROM feed_posts WHERE user_id=:'bonus' AND type='STATUS' AND content LIKE '%Levelu%';
+

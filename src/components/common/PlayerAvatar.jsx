@@ -1,6 +1,8 @@
-import { VenetianMask } from 'lucide-react';
+import { Crown, Eye, Leaf, Shield, Sparkles, Sun, VenetianMask } from 'lucide-react';
 import { getAvatarLevel } from '../../lib/avatarLevels';
 import { findFrame } from '../../lib/frames';
+
+const EMBLEMS = { leaf: Leaf, sparkles: Sparkles, shield: Shield, eye: Eye, sun: Sun, crown: Crown };
 
 // One avatar for every surface: optional photo (spec-14), equipped frame (spec-12 §2.4),
 // level styling (spec-21 §6) and the grey NPC look for players who skipped onboarding.
@@ -36,11 +38,27 @@ export default function PlayerAvatar({ name, avatarUrl, level = 1, frameKey = nu
     </span>
   );
 
-  if (!maskTitle || npc) return avatar;
+  // spec-21 §6: each level is visibly different. Too small to read below 40 px.
+  const Emblem = !npc && size >= 40 ? EMBLEMS[lvl.emblem] : null;
+  const emblemSize = Math.max(14, Math.round(size * 0.3));
+  const withEmblem = Emblem ? (
+    <span style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}>
+      {avatar}
+      <span aria-hidden="true" style={{
+        position: 'absolute', left: -2, top: -2, width: `${emblemSize}px`, height: `${emblemSize}px`, borderRadius: '50%',
+        background: '#15111E', border: `1px solid ${lvl.border}`, color: lvl.color,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center'
+      }}>
+        <Emblem size={Math.round(emblemSize * 0.62)} />
+      </span>
+    </span>
+  ) : avatar;
+
+  if (!maskTitle || npc) return withEmblem;
   const badge = Math.max(14, Math.round(size * 0.36));
   return (
     <span style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }} title={`Maska: ${maskTitle}`}>
-      {avatar}
+      {withEmblem}
       <span aria-label={`Maska: ${maskTitle}`} style={{
         position: 'absolute', right: -2, bottom: -2, width: `${badge}px`, height: `${badge}px`, borderRadius: '50%',
         background: '#15111E', border: '1px solid #A78BFA', color: '#A78BFA',

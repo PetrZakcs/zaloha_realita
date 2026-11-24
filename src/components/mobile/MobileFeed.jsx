@@ -1,3 +1,4 @@
+import HomeQuickMenu from '../common/HomeQuickMenu';
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
@@ -199,6 +200,8 @@ auraColor={post.author_aura_color} maskTitle={post.author_mask}
         </div>
       )}
 
+      <HomeQuickMenu />
+
       {/* Filter Tabs */}
       <div style={{ display: 'flex', gap: '8px', paddingBottom: '4px', flexShrink: 0 }}>
         {[
@@ -247,11 +250,11 @@ auraColor={post.author_aura_color} maskTitle={post.author_mask}
           const isTextOnly = !isHighlight && !post.image_url;
 
           // Feed Engine "MVP1 — POSTS: System/World Card" — published by the game itself.
-          if (post.type === 'WORLD') {
+          if (post.type === 'WORLD' || post.type === 'FEATURED') {
             return (
               <div style={{ background: 'linear-gradient(150deg,#10222E,#15111E)', border: '1px solid #38BDF8', borderRadius: '20px', padding: '14px 16px' }}>
                 <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', letterSpacing: '.1em', color: '#38BDF8', textTransform: 'uppercase', marginBottom: '6px' }}>
-                  Svět Hry Reality
+                  {post.type === 'FEATURED' ? 'Vybraný moment' : 'Svět Hry Reality'}
                 </div>
                 <div style={{ fontFamily: 'Inter', fontSize: '13px', color: '#F0F0F8', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>{post.content}</div>
               </div>

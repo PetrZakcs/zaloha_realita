@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
 import { track } from '../../lib/analytics';
 import { startCheckout } from '../../lib/checkout';
-import { ArrowRight, Sparkles, Lock } from 'lucide-react';
+import { ArrowRight, Sparkles } from 'lucide-react';
 import ShareMomentButton from '../common/ShareMomentButton';
 
 // Optional, configured per environment once the client supplies them.
@@ -58,6 +59,7 @@ function StepButton({ children, onClick, disabled, variant = 'primary' }) {
 }
 
 export default function SeasonReflectionFlow() {
+  const navigate = useNavigate();
   const {
     user,
     seasonReflectionStep: step,
@@ -383,9 +385,10 @@ export default function SeasonReflectionFlow() {
             onClick={() => {
               track('referential_node_completed');
               closeModal();
+              navigate('/integration');
             }}
           >
-            <Lock size={16} /> Zavřít
+            Pokračovat do integrační fáze
           </StepButton>
         </div>
       )}

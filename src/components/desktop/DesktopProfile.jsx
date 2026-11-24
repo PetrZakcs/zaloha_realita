@@ -29,6 +29,7 @@ export default function DesktopProfile() {
         .select('*')
         .eq('user_id', session.user.id)
         .eq('is_public', true)
+        .eq('moderation_status', 'approved')
         .order('created_at', { ascending: false })
         .limit(3);
       if (!cancelled) setProofs(data || []);

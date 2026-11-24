@@ -6,6 +6,8 @@ import { captureTouch } from './lib/attribution';
 import { useUserStore } from './store/userStore';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
+import IntegrationPhase from './components/IntegrationPhase';
+import QuestMap from './components/QuestMap';
 import Story from './components/Story';
 import Feed from './components/Feed';
 import Leaderboard from './components/Leaderboard';
@@ -163,6 +165,8 @@ function App() {
           <Route path="/profile" element={<Profile />} />
           <Route path="/profile/:userId" element={<PublicProfile />} />
           <Route path="/inventory" element={<Inventory />} />
+          <Route path="/integration" element={<IntegrationPhase />} />
+          <Route path="/map" element={<QuestMap />} />
         </Route>
         <Route path="/admin" element={<AdminRoute />} />
         <Route path="/terms" element={<Terms />} />

@@ -5,6 +5,7 @@ import { useUserStore } from '../../store/userStore';
 import { KeyRound, Play, Lock, Crown, Check, ArrowRight } from 'lucide-react';
 import NpcBanner from '../common/NpcBanner';
 import NextMoveCard from '../common/NextMoveCard';
+import HomeQuickMenu from '../common/HomeQuickMenu';
 
 export default function DesktopDashboard() {
   const { user, activeChallenge, allStoryNodes, loadAllStoryNodes } = useUserStore();
@@ -31,6 +32,7 @@ export default function DesktopDashboard() {
     }}>
       <NpcBanner />
       <NextMoveCard compact={false} />
+      <HomeQuickMenu />
 
       {/* LEVEL + QUEST PATH ROW */}
       <div style={{ display: 'flex', gap: '16px', flexShrink: 0 }}>

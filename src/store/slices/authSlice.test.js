@@ -207,12 +207,12 @@ describe('session and onboarding resume', () => {
     expect(useUserStore.getState().onboarded).toBe(true);
   });
 
-  test('a player with no onboarding record resumes at identity on a new device', async () => {
+  test('a player with no onboarding record resumes at the entry step on a new device', async () => {
     mockPlayerState = { onboarding_completed_at: null, onboarding_skipped_at: null };
     await useUserStore.getState().fetchUser('user-9');
     mockPlayerState = [];
     expect(useUserStore.getState().onboarded).toBe(false);
-    expect(useUserStore.getState().onboardingStep).toBe('identity');
+    expect(useUserStore.getState().onboardingStep).toBe('entry');
   });
 
   test('clearLocalSession forgets the player and returns to the landing', () => {

@@ -4,6 +4,8 @@ import AdminPlayerDetail from './AdminPlayerDetail';
 import AdminKpi from './AdminKpi';
 import AdminCatalogs from './AdminCatalogs';
 import AdminReview from './AdminReview';
+import AdminModerationCard from './AdminModerationCard';
+import { proofStorageLocation } from '../../lib/privateMedia';
 import { 
   Save, Plus, Trash2, ArrowLeft, RefreshCw, Layers, Users, ShieldAlert, 
   Search, Award, KeyRound, CheckCircle, ShieldX, BarChart3, SlidersHorizontal, Flag, Download
@@ -55,6 +57,7 @@ export default function AdminContentManager({ onClose }) {
   // Moderation Tab States
   const [posts, setPosts] = useState([]);
   const [postSearch, setPostSearch] = useState('');
+  const [postFilter, setPostFilter] = useState('queue');
 
   // ----------------------------------------------------
   // Initial & Tab Fetchers
@@ -83,7 +86,8 @@ export default function AdminContentManager({ onClose }) {
         const { data, error } = await supabase
           .from('feed_posts')
           .select('*, feed_reports(reason)')
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(500);
         if (error) throw error;
         // Reported posts first (hidden-by-reports on top), then newest.
         const withReports = (data || []).map(p => ({ ...p, reports: p.feed_reports || [] }));
@@ -171,10 +175,12 @@ export default function AdminContentManager({ onClose }) {
   };
 
   // Feed Engine "System/World Card" — published under the game's name (admin-only RPC).
-  const handlePublishWorld = async () => {
+  const handlePublishWorld = async (featured = false) => {
     const text = worldText.trim();
     if (!text) return;
-    const { error } = await supabase.rpc('publish_world_post', { p_content: text });
+    const { error } = featured
+      ? await supabase.rpc('publish_featured_post', { p_content: text })
+      : await supabase.rpc('publish_world_post', { p_content: text });
     if (error) {
       alert('Publikace selhala: ' + error.message);
       return;
@@ -280,39 +286,39 @@ export default function AdminContentManager({ onClose }) {
   // ----------------------------------------------------
   // Tab 3: Moderation actions
   // ----------------------------------------------------
-  const handleTogglePostPublic = async (post) => {
+  const handleModeratePost = async (post, action) => {
     try {
-      const nextPublic = !post.is_public;
-      // Restoring a post that reports hid clears the reports too (reviewed and approved).
-      const restoringReported = nextPublic && post.hidden_by_reports;
-      const { error } = await supabase
-        .from('feed_posts')
-        .update(restoringReported ? { is_public: true, hidden_by_reports: false } : { is_public: nextPublic })
-        .eq('id', post.id);
-
+      const { data, error } = await supabase.rpc('admin_moderate_post', { p_post_id: post.id, p_action: action });
       if (error) throw error;
-      if (restoringReported) {
-        const { error: reportsError } = await supabase.from('feed_reports').delete().eq('post_id', post.id);
-        if (reportsError) throw reportsError;
-      }
       setPosts(posts.map(p => p.id === post.id
-        ? { ...p, is_public: nextPublic, ...(restoringReported ? { hidden_by_reports: false, reports: [] } : {}) }
+        ? {
+            ...p,
+            moderation_status: data,
+            moderated_by: 'admin',
+            ...(action === 'approve' ? { hidden_by_reports: false, is_public: true, reports: [] } : {})
+          }
         : p));
     } catch (e) {
-      alert('Nepodařilo se změnit viditelnost příspěvku: ' + e.message);
+      alert('Rozhodnutí se nepodařilo uložit: ' + e.message);
     }
   };
 
-  const handleDeletePost = async (postId) => {
-    if (!window.confirm('Opravdu chceš smazat tento důkaz z feedu?')) return;
+  const handleDeletePost = async (post) => {
+    if (!window.confirm('Opravdu chceš důkaz trvale smazat i se souborem?')) return;
     try {
+      // The file goes first: if this fails the post stays listed and the admin can retry.
+      const location = proofStorageLocation(post.image_url);
+      if (location) {
+        const { error: fileError } = await supabase.storage.from(location.bucket).remove([decodeURIComponent(location.path)]);
+        if (fileError) throw fileError;
+      }
       const { error } = await supabase
         .from('feed_posts')
         .delete()
-        .eq('id', postId);
+        .eq('id', post.id);
 
       if (error) throw error;
-      setPosts(posts.filter(p => p.id !== postId));
+      setPosts(posts.filter(p => p.id !== post.id));
     } catch (e) {
       alert('Smazání selhalo: ' + e.message);
     }
@@ -324,7 +330,16 @@ export default function AdminContentManager({ onClose }) {
     (p.email || '').toLowerCase().includes(playerSearch.toLowerCase())
   );
 
-  const filteredPosts = posts.filter(p => 
+  const needsAttention = (p) => ['pending', 'needs_review'].includes(p.moderation_status) || p.hidden_by_reports || p.reports.length > 0;
+  const moderationFilters = {
+    queue: needsAttention,
+    rejected: (p) => p.moderation_status === 'rejected',
+    live: (p) => p.moderation_status === 'approved' && !p.hidden_by_reports,
+    private: (p) => p.moderation_status === 'not_required',
+    all: () => true,
+  };
+
+  const filteredPosts = posts.filter(moderationFilters[postFilter]).filter(p =>
     (p.user_name || '').toLowerCase().includes(postSearch.toLowerCase()) ||
     (p.content || '').toLowerCase().includes(postSearch.toLowerCase())
   );
@@ -1100,7 +1115,11 @@ export default function AdminContentManager({ onClose }) {
                 placeholder="World karta do feedu (např. „Portál je otevřen do neděle.“)"
                 style={{ flex: 1, background: '#0D0A18', border: '1px solid #38BDF8', borderRadius: '10px', padding: '10px 12px', color: '#fff', fontFamily: 'Inter', fontSize: '13px', resize: 'vertical' }}
               />
-              <button type="button" onClick={handlePublishWorld} disabled={!worldText.trim()}
+              <button type="button" onClick={() => handlePublishWorld(true)} disabled={!worldText.trim()}
+                style={{ height: '42px', background: 'transparent', color: '#F5B73F', border: '1px solid #F5B73F', borderRadius: '10px', padding: '0 14px', fontFamily: 'Inter', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
+                Wow karta
+              </button>
+              <button type="button" onClick={() => handlePublishWorld()} disabled={!worldText.trim()}
                 style={{ height: '42px', background: '#0EA5E9', color: '#fff', border: 'none', borderRadius: '10px', padding: '0 14px', fontFamily: 'Inter', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
                 Publikovat
               </button>
@@ -1128,88 +1147,33 @@ export default function AdminContentManager({ onClose }) {
                 />
               </div>
               <div style={{ color: '#6B6B8A', fontSize: '13px' }}>
-                Celkem důkazů: <span style={{ color: '#fff', fontWeight: '600' }}>{filteredPosts.length}</span>
+                Zobrazeno: <span style={{ color: '#fff', fontWeight: '600' }}>{filteredPosts.length}</span>
               </div>
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
+              {[
+                ['queue', 'Ke kontrole'],
+                ['rejected', 'Stažené'],
+                ['live', 'Ve feedu'],
+                ['private', 'Soukromé'],
+                ['all', 'Vše'],
+              ].map(([key, title]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setPostFilter(key)}
+                  style={{ background: postFilter === key ? '#7C3AED' : '#15111E', color: postFilter === key ? '#fff' : '#9A9AB5', border: '1px solid #1B1430', borderRadius: '8px', padding: '6px 12px', fontFamily: 'Inter', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+                >
+                  {title} · {posts.filter(moderationFilters[key]).length}
+                </button>
+              ))}
             </div>
 
             {/* Posts Cards Grid */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
               {filteredPosts.map((post) => (
-                <div 
-                  key={post.id}
-                  style={{
-                    background: '#15111E',
-                    border: '1px solid #1B1430',
-                    borderRadius: '14px',
-                    padding: '16px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                    minHeight: '140px'
-                  }}
-                >
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <span style={{ fontFamily: 'Inter', fontWeight: '700', fontSize: '14px', color: '#fff' }}>{post.user_name}</span>
-                      <span style={{ fontSize: '11px', color: '#6B6B8A' }}>
-                        {new Date(post.created_at).toLocaleDateString('cs-CZ')}
-                      </span>
-                    </div>
-                    {post.reports.length > 0 && (
-                      <div style={{ fontFamily: 'Inter', fontSize: '11.5px', color: '#EF4444', background: 'rgba(239,68,68,.1)', borderRadius: '8px', padding: '6px 10px', marginBottom: '10px' }}>
-                        ⚠ {post.reports.length}× nahlášeno ({[...new Set(post.reports.map(r => r.reason))].join(', ')})
-                        {post.hidden_by_reports && ' · skryto do kontroly'}
-                      </div>
-                    )}
-                    {post.image_url && (
-                      <img
-                        src={post.image_url}
-                        alt={`Důkaz od ${post.user_name}`}
-                        style={{ width: '100%', maxHeight: '220px', objectFit: 'cover', borderRadius: '10px', marginBottom: '10px' }}
-                      />
-                    )}
-                    <p style={{ fontFamily: 'Inter', fontSize: '13px', color: '#F0F0F8', lineHeight: '1.5', margin: '0 0 16px 0' }}>
-                      {post.content}
-                    </p>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '0.5px solid #1B1430', paddingTop: '12px' }}>
-                    <button 
-                      onClick={() => handleTogglePostPublic(post)}
-                      style={{
-                        background: post.is_public ? 'rgba(34,197,94,.15)' : 'rgba(239,68,68,.15)',
-                        border: 'none',
-                        borderRadius: '8px',
-                        color: post.is_public ? '#22C55E' : '#EF4444',
-                        padding: '6px 12px',
-                        fontFamily: 'Inter',
-                        fontWeight: '600',
-                        fontSize: '11.5px',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      {post.is_public ? '🟢 Veřejný' : '🔒 Soukromý'}
-                    </button>
-
-                    <button 
-                      onClick={() => handleDeletePost(post.id)}
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: '#EF4444',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        fontFamily: 'Inter',
-                        fontWeight: '600',
-                        fontSize: '11.5px'
-                      }}
-                    >
-                      <Trash2 size={13} /> Smazat
-                    </button>
-                  </div>
-                </div>
+                <AdminModerationCard key={post.id} post={post} onModerate={handleModeratePost} onDelete={handleDeletePost} />
               ))}
             </div>
           </div>

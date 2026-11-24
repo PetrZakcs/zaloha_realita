@@ -21,6 +21,7 @@ export default function PublicProfile() {
   const navigate = useNavigate();
   const [profile, setProfile] = useState(null);
   const [proofs, setProofs] = useState([]);
+  const [privacy, setPrivacy] = useState({ show_progress: true, show_proofs: true, show_collection: true });
   const [status, setStatus] = useState('loading'); // 'loading' | 'ready' | 'not-found'
 
   useEffect(() => {
@@ -35,11 +36,15 @@ export default function PublicProfile() {
           .select('*')
           .eq('user_id', userId)
           .eq('is_public', true)
+          .eq('moderation_status', 'approved')
           .order('created_at', { ascending: false })
           .limit(3)
       ]);
 
       if (cancelled) return;
+      const { data: privacyData } = await supabase.from('player_privacy').select('show_progress, show_proofs, show_collection').eq('user_id', userId).maybeSingle();
+      if (cancelled) return;
+      if (privacyData) setPrivacy(privacyData);
       if (profileError || !profileData) {
         setStatus('not-found');
         return;
@@ -118,11 +123,13 @@ export default function PublicProfile() {
             );
           })()}
 
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: '#6B6B8A', marginTop: '10px' }}>
+          {privacy.show_progress && (
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: '#6B6B8A', marginTop: '10px' }}>
             Uzel {profile.uzel || 0} / 9
           </div>
+          )}
 
-          {profile.showcase_card_keys?.length > 0 && (
+          {privacy.show_collection && profile.showcase_card_keys?.length > 0 && (
             <div style={{ width: '100%', maxWidth: '360px', marginTop: '24px' }}>
               <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '11px', color: '#6B6B8A', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '10px' }}>
                 Showcase
@@ -145,6 +152,7 @@ export default function PublicProfile() {
             <ProfileIdentitySection userId={userId} statusTitle={profile.status_title} passHolder={!!profile.pass_holder} />
           </div>
 
+          {privacy.show_proofs && (
           <div style={{ width: '100%', maxWidth: '360px', marginTop: '28px' }}>
             <div style={{ fontFamily: 'Inter', fontWeight: '600', fontSize: '11px', color: '#6B6B8A', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '10px' }}>
               Poslední důkazy
@@ -160,6 +168,7 @@ export default function PublicProfile() {
               ))}
             </div>
           </div>
+          )}
         </div>
       )}
     </div>

@@ -20,6 +20,12 @@ const sectionTitle = { fontFamily: 'Inter', fontWeight: 600, fontSize: '11px', l
 //   - earned badges, click for description + rarity (spec-12 §4.7)
 //   - own profile only: code fragments (spec-12 §9), photo change (spec-14), and
 //     "Moje důkazy" — every own proof incl. private ones (spec-17 §2)
+const PROOF_STATUS_LABEL = {
+  pending: 'Čeká na kontrolu',
+  needs_review: 'Čeká na kontrolu',
+  rejected: 'Neprošel kontrolou',
+};
+
 export default function ProfileIdentitySection({ userId, isOwn = false, statusTitle, passHolder = false }) {
   const { badgeCatalog, fragments, loadIdentityExtras, uploadAvatar, removeAvatar, user, setPrimaryBadge } = useUserStore();
   const [ownedBadges, setOwnedBadges] = useState([]);
@@ -46,7 +52,7 @@ export default function ProfileIdentitySection({ userId, isOwn = false, statusTi
         loadIdentityExtras();
         const { data: own } = await supabase
           .from('feed_posts')
-          .select('id, content, image_url, media_type, is_public, created_at, type')
+          .select('id, content, image_url, media_type, is_public, created_at, type, moderation_status')
           .eq('user_id', userId)
           .in('type', ['PROOF', 'ONBOARDING'])
           .order('created_at', { ascending: false });
@@ -237,7 +243,7 @@ export default function ProfileIdentitySection({ userId, isOwn = false, statusTi
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F0F0F8', lineHeight: 1.4 }}>{p.content}</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', marginTop: '4px' }}>
-                    {p.is_public ? <><Globe size={11} /> Veřejný</> : <><Lock size={11} /> Soukromý</>} · {new Date(p.created_at).toLocaleDateString('cs-CZ')}
+                    {p.is_public ? <><Globe size={11} /> {PROOF_STATUS_LABEL[p.moderation_status] || 'Veřejný'}</> : <><Lock size={11} /> Soukromý</>} · {new Date(p.created_at).toLocaleDateString('cs-CZ')}
                   </div>
                 </div>
               </div>

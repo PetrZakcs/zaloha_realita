@@ -5,7 +5,7 @@ import { MOBILE_ONBOARDING_STEPS } from '../../store/slices/authSlice';
 import EmailAuthForm from '../onboarding/EmailAuthForm';
 import { GoogleIcon, DiscordIcon } from '../onboarding/AuthIcons';
 import { EXTRA_OAUTH_PROVIDERS } from '../../lib/authProviders';
-import { LandingStep, FirstRewardStep, FirstDropStep, IdentityStep, TransitionStep } from '../onboarding/OnboardingExtraSteps';
+import { EntryStep, LandingStep, FirstRewardStep, FirstDropStep, IdentityStep, TransitionStep } from '../onboarding/OnboardingExtraSteps';
 
 const RADIUS = 16;
 
@@ -147,6 +147,7 @@ export default function MobileOnboarding() {
           </div>
         )}
 
+        {onboardingStep === 'entry' && <EntryStep onNext={() => nextOnboardingStep(true)} />}
         {onboardingStep === 'identity' && <IdentityStep onNext={() => nextOnboardingStep(true)} />}
         {onboardingStep === 'first-reward' && <FirstRewardStep onNext={() => nextOnboardingStep(true)} />}
 

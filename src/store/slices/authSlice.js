@@ -3,6 +3,7 @@ import { track } from '../../lib/analytics';
 import { getTouches } from '../../lib/attribution';
 import { compressImage } from '../../lib/compressImage';
 import { unsubscribeFromPush } from '../../lib/push';
+import { requestProofModeration } from '../../lib/moderation';
 
 // Ordered onboarding step sequences per platform — spec-14 (the newer flow, login first):
 //   landing (hero + CTA, no session) -> login (the only step touching Supabase Auth) ->
@@ -14,12 +15,12 @@ import { unsubscribeFromPush } from '../../lib/push';
 //   into the first story node).
 // Desktop gets an extra 'install' (PWA) step right before the transition; mobile keeps its
 // separate post-onboarding install banner instead (see PwaInstallBanner.jsx).
-export const MOBILE_ONBOARDING_STEPS = ['landing', 'login', 'identity', 'first-reward', 'slib', 'avatar-upgrade', 'mystery-box', 'transition'];
-export const DESKTOP_ONBOARDING_STEPS = ['landing', 'login', 'identity', 'first-reward', 'slib', 'avatar-upgrade', 'mystery-box', 'install', 'transition'];
+export const MOBILE_ONBOARDING_STEPS = ['landing', 'login', 'entry', 'identity', 'first-reward', 'slib', 'avatar-upgrade', 'mystery-box', 'transition'];
+export const DESKTOP_ONBOARDING_STEPS = ['landing', 'login', 'entry', 'identity', 'first-reward', 'slib', 'avatar-upgrade', 'mystery-box', 'install', 'transition'];
 
 // Steps a signed-in player can be in the middle of. A reload here must resume the flow instead
 // of dropping them into the game with half the rewards missing.
-const POST_LOGIN_STEPS = ['identity', 'first-reward', 'slib', 'avatar-upgrade', 'mystery-box', 'install', 'transition'];
+const POST_LOGIN_STEPS = ['entry', 'identity', 'first-reward', 'slib', 'avatar-upgrade', 'mystery-box', 'install', 'transition'];
 
 const LOCAL_SESSION_KEYS = ['user', 'userId', 'onboarded', 'onboardingStep', 'proofsSubmittedCount', 'glitchMomentShown'];
 
@@ -279,8 +280,8 @@ export const createAuthSlice = (set, get) => {
 
         const needsConfirmation = !data.session;
         if (!needsConfirmation) {
-          set({ user: newUser, onboardingStep: 'identity' });
-          localStorage.setItem('onboardingStep', 'identity');
+          set({ user: newUser, onboardingStep: 'entry' });
+          localStorage.setItem('onboardingStep', 'entry');
           get().loadCurrentNodeData();
           // Drive the actual profiles-row creation directly too, same reason
           // as loginWithEmail — don't leave it solely to the async listener.
@@ -405,6 +406,7 @@ export const createAuthSlice = (set, get) => {
           // feed_posts no longer accepts direct client INSERTs.
           const { error } = await supabase.rpc('publish_pledge', { p_text: pledgeText });
           if (error) throw error;
+          requestProofModeration(get().fetchFeedPosts);
           get().fetchFeedPosts();
         }
       } catch (e) {
@@ -696,11 +698,11 @@ export const createAuthSlice = (set, get) => {
             passLapsed: !data.pass_holder && (priorSubscriptions ?? 0) > 0
           };
 
-          // A signed-in player mid-onboarding resumes it (a new device starts at 'identity').
+          // A signed-in player mid-onboarding resumes it (a new device starts at 'entry').
           const finished = ps ? !!(ps.onboarding_completed_at || ps.onboarding_skipped_at) : true;
           const midFlow = POST_LOGIN_STEPS.includes(get().onboardingStep);
           if (!finished || midFlow) {
-            set({ user: mappedUser, onboarded: false, onboardingStep: midFlow ? get().onboardingStep : 'identity' });
+            set({ user: mappedUser, onboarded: false, onboardingStep: midFlow ? get().onboardingStep : 'entry' });
             localStorage.setItem('user', JSON.stringify(mappedUser));
             localStorage.removeItem('onboarded');
             get().loadCurrentNodeData();
@@ -858,7 +860,7 @@ export const createAuthSlice = (set, get) => {
         const finalUser = { ...DEFAULT_USER, ...u, id: userId, name: attemptName, email: session.user.email, questsCompleted: 0 };
         set({ user: finalUser, onboardingStep: 'identity' });
         localStorage.setItem('user', JSON.stringify(finalUser));
-        localStorage.setItem('onboardingStep', 'identity');
+        localStorage.setItem('onboardingStep', 'entry');
         get().loadCurrentNodeData();
         track('local_progress_migrated', { xp: u.xp, uzel: u.uzel, keys: u.keys_count, was_onboarded: get().onboarded });
 

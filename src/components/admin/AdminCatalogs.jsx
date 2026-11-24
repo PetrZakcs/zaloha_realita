@@ -69,6 +69,24 @@ const SECTIONS = {
       ],
     },
   },
+  integration: {
+    label: 'Integrace',
+    props: {
+      table: 'integration_signals', keyField: 'id', orderBy: 'sort_order',
+      note: 'Signály po dokončení sezóny. „Den“ se počítá od vstupu hráče do integrační fáze. Obsah je pracovní ze zadání, finální dodá klient.',
+      newRow: { id: '', phase: 'integration', sort_order: 0, unlock_day: 0, title: '', body: '', prompt: '', is_active: true },
+      fields: [
+        { key: 'id', label: 'ID', type: 'text', readOnlyOnEdit: true },
+        { key: 'phase', label: 'Vrstva', type: 'select', options: ['integration', 'bridge'] },
+        { key: 'sort_order', label: 'Pořadí', type: 'number' },
+        { key: 'unlock_day', label: 'Den', type: 'number' },
+        { key: 'title', label: 'Název', type: 'text' },
+        { key: 'body', label: 'Text', type: 'textarea' },
+        { key: 'prompt', label: 'Otázka', type: 'textarea' },
+        { key: 'is_active', label: 'Aktivní', type: 'bool' },
+      ],
+    },
+  },
   seasons: {
     label: 'Sezóny',
     props: {

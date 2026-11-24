@@ -1,3 +1,4 @@
+import CommunityBanner from '../common/CommunityBanner';
 import LeaderboardBoard from '../common/LeaderboardBoard';
 
 export default function DesktopLeaderboard() {
@@ -31,6 +32,7 @@ export default function DesktopLeaderboard() {
       {/* Leaderboard content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
         <div style={{ maxWidth: '640px', margin: '0 auto' }}>
+          <CommunityBanner />
           <LeaderboardBoard />
         </div>
       </div>

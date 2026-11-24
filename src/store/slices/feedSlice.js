@@ -66,14 +66,19 @@ export const createFeedSlice = (set, get) => {
           // Admins can also receive non-public rows (their RLS policy sees everything) —
           // the feed only ever shows public posts.
           if (payload.eventType === 'INSERT') {
-            if (!payload.new.is_public) return;
+            if (!payload.new.is_public || payload.new.moderation_status !== 'approved') return;
             if (get().blockedUserIds.includes(payload.new.user_id)) return;
             const newItem = mapFeedRow(payload.new);
             set(state => ({ feed: [newItem, ...state.feed.filter(x => x.id !== newItem.id)] }));
           } else if (payload.eventType === 'UPDATE') {
             // Hidden by reports / moderation → drop it from the visible feed.
-            if (payload.new.is_public === false) {
+            if (payload.new.is_public === false || (payload.new.moderation_status && payload.new.moderation_status !== 'approved')) {
               set(state => ({ feed: state.feed.filter(item => item.id !== payload.new.id) }));
+              return;
+            }
+            // Just approved: it was never in the feed, and an update carries no author details.
+            if (!get().feed.some(item => item.id === payload.new.id) && !get().blockedUserIds.includes(payload.new.user_id)) {
+              get().fetchFeedPosts();
               return;
             }
             set(state => ({

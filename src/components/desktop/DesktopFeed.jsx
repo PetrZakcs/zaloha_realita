@@ -1,3 +1,4 @@
+import HomeQuickMenu from '../common/HomeQuickMenu';
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../../store/userStore';
@@ -196,6 +197,8 @@ export default function DesktopFeed() {
           </div>
         )}
 
+        <div style={{ marginBottom: '16px' }}><HomeQuickMenu /></div>
+
         <div ref={gridRef} style={{
           columnCount: 3,
           columnGap: '16px',
@@ -211,10 +214,10 @@ export default function DesktopFeed() {
             const isPhotoCard = !isHighlight && !!post.image_url;
 
             // Feed Engine "MVP1 — POSTS: System/World Card".
-            if (post.type === 'WORLD') {
+            if (post.type === 'WORLD' || post.type === 'FEATURED') {
               return (
                 <div key={post.id} data-post-id={post.id} style={{ breakInside: 'avoid', marginBottom: '16px', background: 'linear-gradient(150deg,#10222E,#15111E)', border: '1px solid #38BDF8', borderRadius: '18px', padding: '13px 14px' }}>
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '9px', letterSpacing: '.1em', color: '#38BDF8', textTransform: 'uppercase', marginBottom: '6px' }}>Svět Hry Reality</div>
+                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '9px', letterSpacing: '.1em', color: '#38BDF8', textTransform: 'uppercase', marginBottom: '6px' }}>{post.type === 'FEATURED' ? 'Vybraný moment' : 'Svět Hry Reality'}</div>
                   <div style={{ fontFamily: 'Inter', fontSize: '12px', color: '#F0F0F8', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>{post.content}</div>
                 </div>
               );

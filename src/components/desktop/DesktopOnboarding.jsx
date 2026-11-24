@@ -6,7 +6,7 @@ import { MonitorDown, Check } from 'lucide-react';
 import EmailAuthForm from '../onboarding/EmailAuthForm';
 import { GoogleIcon, DiscordIcon } from '../onboarding/AuthIcons';
 import { EXTRA_OAUTH_PROVIDERS } from '../../lib/authProviders';
-import { LandingStep, FirstRewardStep, FirstDropStep, IdentityStep, TransitionStep } from '../onboarding/OnboardingExtraSteps';
+import { EntryStep, LandingStep, FirstRewardStep, FirstDropStep, IdentityStep, TransitionStep } from '../onboarding/OnboardingExtraSteps';
 import { usePwaInstall } from '../../hooks/usePwaInstall';
 
 const RADIUS = 16;
@@ -214,6 +214,12 @@ export default function DesktopOnboarding() {
         <div style={{ fontFamily: 'Inter', fontSize: '11px', color: '#6B6B8A', textAlign: 'center', marginTop: '16px', lineHeight: '1.55' }}>
           Pokračováním souhlasíš s <a href="/terms" style={{ color: '#9A9AB5' }}>podmínkami</a> a <a href="/privacy" style={{ color: '#9A9AB5' }}>zpracováním údajů</a>.
         </div>
+      </Card>
+    );
+  } else if (step === 'entry') {
+    rightPanel = (
+      <Card>
+        <EntryStep onNext={() => nextOnboardingStep(false)} />
       </Card>
     );
   } else if (step === 'identity') {

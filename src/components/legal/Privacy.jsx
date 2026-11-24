@@ -35,6 +35,7 @@ export default function Privacy() {
           body: [
             'Supabase (databáze a autentizace, EU/US infrastruktura) — technický zpracovatel.',
             'Stripe (platby) — pokud si aktivuješ Founder Pass.',
+            'Anthropic (AI kontrola obsahu, USA) — fotky a texty veřejných důkazů automaticky kontrolujeme, než se zobrazí ve feedu. Soukromé důkazy ani videa AI neposíláme. Rozhodnutí AI může přezkoumat a změnit admin.',
             '[DOPLNIT: Airtable/Discord integrace — pokud propojíš Discord účet, informace o odemčených odměnách se synchronizují do externího Airtable přes vlastní backend integraci.]',
             'Údaje neprodáváme třetím stranám pro marketingové účely.'
           ]

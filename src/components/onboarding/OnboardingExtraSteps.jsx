@@ -147,6 +147,31 @@ export function SkipOnboardingLink({ step }) {
 
 // spec-14 ENTRY: "Kdo jsi jako hráč? Vytvoř svou přezdívku · Vložit foto". Both optional —
 // without a nickname the auto-generated one stays, without a photo the default avatar.
+// spec-3 §2 "ENTRY + FIRST ACTION" and spec-12 §2.5 intro: what the game is, then one instinctive
+// click that moves on by itself. The answer only feeds the onboarding KPIs.
+export function EntryStep({ onNext }) {
+  const choose = (answer) => {
+    track('onboarding_entry_answered', { answer });
+    onNext();
+  };
+  return (
+    <div style={{ width: '100%', textAlign: 'center' }}>
+      <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: '24px', color: '#F0F0F8' }}>Tohle není hra.</div>
+      <div style={{ fontFamily: 'Inter', fontSize: '14px', color: '#9A9AB5', lineHeight: 1.5, marginTop: '10px' }}>
+        Plníš krátké výzvy ve skutečném životě, dokládáš je a tvoje postava roste s tebou. Další krok je vždycky jeden a jasný.
+      </div>
+      <div style={{ fontFamily: 'Inter', fontWeight: 600, fontSize: '14px', color: '#F0F0F8', marginTop: '20px' }}>Vyber instinktivně:</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '12px' }}>
+        {[['stagnating', 'Mám pocit, že stagnuju'], ['moving', 'Mám pocit, že se posouvám']].map(([value, label]) => (
+          <button key={value} type="button" onClick={() => choose(value)} style={{ minHeight: '48px', background: '#241C3C', border: '1px solid #7C3AED', borderRadius: '14px', color: '#F0F0F8', fontFamily: 'Inter', fontWeight: 600, fontSize: '14px', cursor: 'pointer' }}>
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function IdentityStep({ onNext }) {
   const { user, setInitialNickname, uploadAvatar } = useUserStore();
   const [nickname, setNickname] = useState('');

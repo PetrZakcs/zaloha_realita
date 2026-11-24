@@ -165,7 +165,7 @@ describe('MVP1 finish', () => {
   });
 
   test('onboarding follows the login-first order on both platforms', () => {
-    const order = ['landing', 'login', 'identity', 'first-reward', 'slib', 'avatar-upgrade', 'mystery-box'];
+    const order = ['landing', 'login', 'entry', 'identity', 'first-reward', 'slib', 'avatar-upgrade', 'mystery-box'];
     expect(MOBILE_ONBOARDING_STEPS).toEqual([...order, 'transition']);
     expect(DESKTOP_ONBOARDING_STEPS).toEqual([...order, 'install', 'transition']);
   });

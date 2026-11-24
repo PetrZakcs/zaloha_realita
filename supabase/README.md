@@ -205,3 +205,43 @@ permissions, Season Mark, World card, KPI views. See the script header for a Doc
 It also documents a pre-existing ordering quirk: `20260727131520_cleanup_legacy_schema.sql`
 must run **before** the base schema (it drops `challenges`), although its timestamp sorts it
 after. Production was set up in the right order by hand.
+
+## Production release runbook
+
+Production is upgraded by hand in SQL Editor, because the remote migration history is unreliable.
+Rehearse first: `supabase/tests/upgrade_test.sh` replays this exact upgrade on a local database with data.
+
+1. **Back up** the database in the dashboard. A migration can't be undone with one click.
+2. **Set function secrets:** `ANTHROPIC_API_KEY`, `CRON_SECRET`, `APP_URL`, `STRIPE_SECRET_KEY`,
+   `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_ID_MONTHLY`, `STRIPE_PRICE_ID_YEARLY`,
+   `STRIPE_PRICE_ID_DEPOSIT`, `STRIPE_PRICE_ID_MONTHLY_RETURNING`, `VAPID_PUBLIC_KEY`,
+   `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, `DISCORD_WEBHOOK_URL`. Without `ANTHROPIC_API_KEY` new
+   public proofs stay hidden until an admin approves them. Without `DISCORD_WEBHOOK_URL` only the
+   weekly Discord post is off.
+3. **Run the migrations in this order**, one at a time, stopping at any error:
+   `20260929120000`, `20261013120000`, `20261020120000`, `20261020130000`, `20261106120000`,
+   `20261106130000`, `20261106140000`.
+4. **Deploy the functions:**
+   ```bash
+   supabase functions deploy stripe-checkout
+   supabase functions deploy stripe-portal
+   supabase functions deploy moderate-proof
+   supabase functions deploy send-retention-push
+   supabase functions deploy announce-top-doers --no-verify-jwt
+   supabase functions deploy stripe-webhook --no-verify-jwt
+   ```
+5. **Schedule the jobs:** run SECTION 5 of `20261106130000_ai_moderation.sql` with real values for
+   the moderation retry, and the same kind of `cron.schedule` for `announce-top-doers` once a week,
+   sending the `x-cron-secret` header.
+6. **Stripe webhook** must send `checkout.session.completed`, `invoice.paid`,
+   `customer.subscription.updated`, `customer.subscription.deleted`.
+7. **Deploy the frontend last**, since it reads columns the migrations add.
+8. **Check live:** sign in with Google and Discord; post a public photo and see it appear in the
+   feed; post a video and see it wait under Moderace; approve it; take it down; buy the Pass with a
+   Stripe test card; cancel it; install the PWA on a phone and receive a push.
+
+The AI check costs money per proof. The default model is `claude-opus-5-5`; set the
+`MODERATION_MODEL` secret to `claude-haiku-5-5` for a cheaper one, after testing it on real samples.
+
+The Pass bonus is switched in `game_config`: set `pass_xp_bonus_pct` to `0` and `pass_key_bonus_nodes`
+to `[]` to turn it off. Integration signals are edited in admin under Katalogy → Integrace.
